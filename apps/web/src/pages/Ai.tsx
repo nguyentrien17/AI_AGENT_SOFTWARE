@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
-import { errorMessage, get, post, put } from '../api/client';
-import type { Agent, Budget, Model, ModelConfig, Page, Provider } from '../api/types';
-import { Badge, Button, Card, ErrorNote, Input, Label, Mono, Muted, Select, Table, Tabs, Td } from '../components/ui';
+import { ApiError, del, errorMessage, get, post, put } from '../api/client';
+import type { Agent, Budget, Model, ModelConfig, Page, PlaygroundBenchmark, PlaygroundCompareResult, PlaygroundRunResult, Provider } from '../api/types';
+import { Badge, Button, Card, ErrorNote, Input, Label, Mono, Muted, Select, Table, Tabs, Td, Textarea, when } from '../components/ui';
 
-type Tab = 'providers' | 'models' | 'assignments' | 'budgets';
+type Tab = 'providers' | 'models' | 'assignments' | 'budgets' | 'playground';
 
 export function AiPage() {
   const [tab, setTab] = useState<Tab>('providers');
@@ -19,12 +19,14 @@ export function AiPage() {
           ['models', 'Models'],
           ['assignments', 'Agent assignments'],
           ['budgets', 'Budgets'],
+          ['playground', 'Playground'],
         ]}
       />
       {tab === 'providers' && <Providers />}
       {tab === 'models' && <Models />}
       {tab === 'assignments' && <Assignments />}
       {tab === 'budgets' && <Budgets />}
+      {tab === 'playground' && <Playground />}
     </div>
   );
 }
@@ -88,6 +90,7 @@ function Providers() {
           ))}
         </Table>
       </Card>
+      <div className="space-y-4">
       <Card title="Add provider">
         <form onSubmit={onSubmit} className="space-y-3">
           <div className="flex flex-wrap gap-1">
@@ -115,7 +118,50 @@ function Providers() {
           <Button type="submit" disabled={create.isPending}>Add provider</Button>
         </form>
       </Card>
+      <ProviderKey providers={providers.data?.items ?? []} />
+      </div>
     </div>
+  );
+}
+
+/** Rotate or revoke a provider's API key (Blueprint §3.2). The key is write-only: only a masked hint is ever shown. */
+function ProviderKey({ providers }: { providers: Provider[] }) {
+  const qc = useQueryClient();
+  const [providerId, setProviderId] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [done, setDone] = useState('');
+  const target = providers.find((p) => p.id === providerId) ?? providers[0];
+  const after = (msg: string) => (p: Provider) => {
+    setApiKey('');
+    setDone(`${msg} — ${p.credential.hasCredential ? `key ${p.credential.maskedHint ?? 'set'}` : 'no key stored'}`);
+    void qc.invalidateQueries({ queryKey: ['providers'] });
+  };
+  const rotate = useMutation({ mutationFn: () => put<Provider>(`/ai/providers/${target!.id}/credential`, { apiKey }), onSuccess: after('Key replaced') });
+  const revoke = useMutation({ mutationFn: () => del<Provider>(`/ai/providers/${target!.id}/credential`), onSuccess: after('Key revoked') });
+  if (!providers.length) return null;
+  return (
+    <Card title="Replace or revoke a key">
+      <form onSubmit={(e) => { e.preventDefault(); setDone(''); rotate.mutate(); }} className="space-y-3">
+        <Label text="Provider">
+          <Select value={target?.id ?? ''} onChange={(e) => { setProviderId(e.target.value); setDone(''); }}>
+            {providers.map((p) => <option key={p.id} value={p.id}>{p.displayName}</option>)}
+          </Select>
+        </Label>
+        <Muted>Current key: {target?.credential.hasCredential ? <Mono>{target.credential.maskedHint ?? 'set'}</Mono> : 'none'}</Muted>
+        <Label text="New API key" hint="The old key is deactivated; the change is audited (masked hint only).">
+          <Input type="password" required value={apiKey} onChange={(e) => setApiKey(e.target.value)} autoComplete="off" />
+        </Label>
+        <ErrorNote error={rotate.error ?? revoke.error} />
+        {done && <p className="text-sm text-emerald-700">{done}</p>}
+        <div className="flex gap-2">
+          <Button type="submit" disabled={rotate.isPending || !apiKey.trim()}>Save key</Button>
+          <Button type="button" variant="danger" disabled={revoke.isPending || !target?.credential.hasCredential}
+            onClick={() => { setDone(''); if (window.confirm(`Revoke the key of ${target!.displayName}? Calls to this provider will fail until a new key is saved.`)) revoke.mutate(); }}>
+            Revoke key
+          </Button>
+        </div>
+      </form>
+    </Card>
   );
 }
 
@@ -336,6 +382,148 @@ function Budgets() {
           <ErrorNote error={save.error} />
           <Button type="submit" disabled={save.isPending}>Save budget</Button>
         </form>
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * AI Playground (Blueprint §4.7): try one model or compare several on the same prompt. Runs are isolated
+ * from live agent configurations; the API enforces the budget cap and asks for confirmation above the
+ * cost-warning threshold before anything is sent to a provider.
+ */
+function Playground() {
+  const qc = useQueryClient();
+  const models = useQuery({ queryKey: ['models'], queryFn: () => get<Page<Model>>('/ai/models') });
+  const agents = useQuery({ queryKey: ['agents'], queryFn: () => get<Page<Agent>>('/agents') });
+  const benchmarks = useQuery({ queryKey: ['benchmarks'], queryFn: () => get<Page<PlaygroundBenchmark>>('/ai/playground/benchmarks') });
+  const [selected, setSelected] = useState<string[]>([]);
+  const [form, setForm] = useState({ simulatedRole: '', systemPrompt: '', userPrompt: '', maxOutputTokens: '256', temperature: '' });
+  const [results, setResults] = useState<PlaygroundRunResult[]>([]);
+  const [warning, setWarning] = useState<string | null>(null);
+  const [benchName, setBenchName] = useState('');
+
+  const run = useMutation({
+    mutationFn: async (acknowledgeCostWarning: boolean): Promise<PlaygroundRunResult[]> => {
+      const params = {
+        maxOutputTokens: Number(form.maxOutputTokens) || 256,
+        ...(form.temperature ? { temperature: Number(form.temperature) } : {}),
+      };
+      const body = {
+        ...(form.simulatedRole ? { simulatedRole: form.simulatedRole } : {}),
+        ...(form.systemPrompt.trim() ? { systemPrompt: form.systemPrompt } : {}),
+        userPrompt: form.userPrompt,
+        params,
+        acknowledgeCostWarning,
+      };
+      if (selected.length === 1) return [await post<PlaygroundRunResult>('/ai/playground/run', { ...body, modelId: selected[0] })];
+      return (await post<PlaygroundCompareResult>('/ai/playground/compare', { ...body, modelIds: selected })).results;
+    },
+    onMutate: () => setWarning(null),
+    onSuccess: (r) => {
+      setResults(r);
+      void qc.invalidateQueries({ queryKey: ['costs'] });
+    },
+    onError: (e) => {
+      if (e instanceof ApiError && e.code === 'playground_cost_warning_required') {
+        setWarning(String(e.problem['preflightEstimatedCostUsd'] ?? '?'));
+      }
+    },
+  });
+  const save = useMutation({
+    mutationFn: () => post('/ai/playground/benchmarks', { name: benchName, runIds: results.map((r) => r.run.id) }),
+    onSuccess: () => {
+      setBenchName('');
+      void qc.invalidateQueries({ queryKey: ['benchmarks'] });
+    },
+  });
+  const toggle = (id: string) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : s.length >= 5 ? s : [...s, id]));
+  const runError = run.error instanceof ApiError && run.error.code === 'playground_cost_warning_required' ? null : run.error;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card title="Prompt" className="lg:col-span-2">
+          <form onSubmit={(e) => { e.preventDefault(); run.mutate(false); }} className="space-y-3">
+            <Muted>Isolated from production: nothing here changes an agent's model assignment. Pick one model to try it, or 2–5 to compare them side by side.</Muted>
+            <Label text="Simulate agent role" hint="Optional — recorded with the run for comparison.">
+              <Select value={form.simulatedRole} onChange={(e) => setForm({ ...form, simulatedRole: e.target.value })}>
+                <option value="">none</option>
+                {agents.data?.items.map((a) => <option key={a.id} value={a.agentKey}>{a.name}</option>)}
+              </Select>
+            </Label>
+            <Label text="System instructions"><Textarea rows={3} value={form.systemPrompt} onChange={(e) => setForm({ ...form, systemPrompt: e.target.value })} /></Label>
+            <Label text="User prompt"><Textarea rows={5} required value={form.userPrompt} onChange={(e) => setForm({ ...form, userPrompt: e.target.value })} /></Label>
+            <div className="grid grid-cols-2 gap-2">
+              <Label text="Max output tokens" hint="1–8192"><Input type="number" min={1} max={8192} value={form.maxOutputTokens} onChange={(e) => setForm({ ...form, maxOutputTokens: e.target.value })} /></Label>
+              <Label text="Temperature" hint="Empty = model default"><Input type="number" step="0.1" min={0} max={2} value={form.temperature} onChange={(e) => setForm({ ...form, temperature: e.target.value })} /></Label>
+            </div>
+            {warning && (
+              <div className="space-y-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <p>This run is estimated to cost up to <b>${warning}</b>, above the playground warning threshold.</p>
+                <Button type="button" variant="secondary" onClick={() => run.mutate(true)} disabled={run.isPending}>Run anyway</Button>
+              </div>
+            )}
+            <ErrorNote error={runError} />
+            <Button type="submit" disabled={run.isPending || !selected.length || !form.userPrompt.trim()}>
+              {run.isPending ? 'Running…' : selected.length > 1 ? `Compare ${selected.length} models` : 'Run'}
+            </Button>
+          </form>
+        </Card>
+        <Card title={`Models (${selected.length} selected)`}>
+          {!models.data?.items.length && <Muted>Register a model first (Models tab).</Muted>}
+          <div className="space-y-1">
+            {models.data?.items.map((m) => (
+              <label key={m.id} className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={selected.includes(m.id)} onChange={() => toggle(m.id)} />
+                <span><b>{m.modelKey}</b> <span className="text-xs text-slate-500">{m.providerKey}</span></span>
+                <span className="ml-auto text-xs text-slate-500">{m.activePricing ? `$${m.activePricing.inputPerMtok}·$${m.activePricing.outputPerMtok}` : 'no price'}</span>
+              </label>
+            ))}
+          </div>
+        </Card>
+      </div>
+
+      {results.length > 0 && (
+        <Card
+          title="Results"
+          actions={
+            <form onSubmit={(e) => { e.preventDefault(); save.mutate(); }} className="flex gap-2">
+              <Input placeholder="Benchmark name" value={benchName} onChange={(e) => setBenchName(e.target.value)} />
+              <Button type="submit" variant="secondary" disabled={save.isPending || !benchName.trim()}>Save benchmark</Button>
+            </form>
+          }
+        >
+          <ErrorNote error={save.error} />
+          <div className={`grid gap-4 ${results.length > 1 ? 'md:grid-cols-2 xl:grid-cols-3' : ''}`}>
+            {results.map((r) => (
+              <div key={r.run.id} className="space-y-2 rounded-md border border-slate-200 p-3">
+                <div className="flex items-baseline gap-2">
+                  <b>{r.modelKey}</b> <span className="text-xs text-slate-500">{r.providerKey}</span>
+                  <span className="ml-auto text-xs text-slate-500">{r.durationMs} ms</span>
+                </div>
+                <div className="text-xs text-slate-600">
+                  in {r.usage.inputTokens ?? '?'} · out {r.usage.outputTokens ?? '?'}
+                  {r.usage.reasoningTokens ? ` · reasoning ${r.usage.reasoningTokens}` : ''} · est. cost {r.estimatedCost ? `$${r.estimatedCost}` : 'unknown (no pricing)'}
+                </div>
+                {r.run.error ? <ErrorNote error={r.run.error} /> : <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded bg-slate-50 p-2 text-xs">{r.run.output}</pre>}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <Card title="Saved benchmarks">
+        <ErrorNote error={benchmarks.error} />
+        <Table head={['Name', 'Runs', 'Saved']} empty="No benchmarks saved yet.">
+          {benchmarks.data?.items.map((b) => (
+            <tr key={b.id}>
+              <Td>{b.name}</Td>
+              <Td>{b.runIds.length}</Td>
+              <Td className="text-xs">{when(b.createdAt)}</Td>
+            </tr>
+          ))}
+        </Table>
       </Card>
     </div>
   );

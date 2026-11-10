@@ -32,7 +32,8 @@ Part B (user request "làm phần B") is **complete** — report `docs/reports/p
 - Sandbox note: the tool-executor symlink escape test fails with `EPERM` inside a sandbox that forbids
   symlinks; it passes on a normal shell. Do not weaken it.
 - Next: everything left is **blocked** (sandbox / real API key) or needs a decision (R18) — see §5. Ask the
-  user which to unblock; small UI follow-ups R29–R31 are in `docs/reports/part-b.md`.
+  user which to unblock; small UI follow-ups R29–R30 are in `docs/reports/part-b.md` (R31 Playground +
+  key rotation screens: done, smoke 13/13 ok).
 
 Web UI files: `apps/web` (React 19 + Vite 8 + TanStack Query/Router + Tailwind 4). Pages in
 `apps/web/src/pages`: Shell (bootstrap/login/nav), Projects, Project (runs + request editor + start run,
@@ -211,7 +212,7 @@ Status: **doing** = in progress this session · **todo** = can be done now · **
 | P8-06 Lineage API (Blueprint §17 audit questions) | 8 | **done** | `orchestration/src/lineage.ts`, `GET /tasks/{id}/lineage` (needs `audit.read`); test in `apps/api/test/tools.e2e.test.ts` |
 | P7-07 Default SDLC workflow + Developer agent definition | 7 | **done** | `agent-library/developer.yaml`, `agent-library/workflows/sdlc-default.yaml`, `seedWorkflowLibrary`, `POST /workflows/seed` |
 | P8-07 Concurrency tests (parallel claims, lease races) | 8 | **done** | `orchestration/test/library-concurrency.test.ts` |
-| Web UI (B1): P1-14 shell, P2-10 Context Explorer, P3-11 AI Mgmt, P4-10 Usage & Costs, P5-12 dashboards, P8-05 approval UI | 1–8 | **done** | `apps/web`; report `docs/reports/part-b.md`; browser smoke `scripts/ui-smoke.mjs` 11/11 ok. Follow-ups R29–R31 (component tests, smoke in CI, Playground + key-rotation screens) |
+| Web UI (B1): P1-14 shell, P2-10 Context Explorer, P3-11 AI Mgmt, P4-10 Usage & Costs, P5-12 dashboards, P8-05 approval UI | 1–8 | **done** | `apps/web`; report `docs/reports/part-b.md`; browser smoke `scripts/ui-smoke.mjs` 11/11 ok. Follow-ups R29–R30 (component tests, smoke in CI); R31 done |
 | R16 Approval request for provider change | 4 | **done** | router opens approval kind `provider_change` on fallback halt; approved providers allowed for that task; test in `orchestration/test/quality.test.ts` |
 | Phase 6 part B: Docker `SandboxAdapter`, limits, runtime images, terminal/test tools, log streaming, container escape tests | 6 | blocked | No Docker/Podman/WSL on host. Needs a container runtime or a remote Linux host |
 | P8-03 Dependency vulnerability scan | 8 | blocked | Must process untrusted project manifests → run inside the sandbox |
@@ -231,6 +232,7 @@ Status: **doing** = in progress this session · **todo** = can be done now · **
 | R19 tokenizer-based token estimate, R20 actual cost from billing APIs, R23 separate worker process, R24 SSE via LISTEN/NOTIFY, R25 prompt caching | — | todo (post-MVP) | Not needed for MVP gates |
 
 ## 6. Session log (newest first)
+- 2026-11-10 — R31: Web UI Playground tab (run / compare 2–5 models, cost-warning confirm, benchmarks) and provider key replace/revoke form; `del` helper in `api/client.ts`; smoke script gained 2 steps (13/13 ok; Playground step accepts a provider error because no Ollama runs in the smoke environment).
 - 2026-11-10 — Part B closed: Costs "blank page" was the smoke script's case-sensitive match against `uppercase` labels (fixed in `scripts/ui-smoke.mjs`; "Group by" label added in `Costs.tsx`); smoke 11/11 ok. README §3.4 Web UI, `docs/reports/part-b.md`. verify: 34 files / 287 tests (symlink escape test needs a non-sandboxed shell).
 - 2026-11-10 — Part B backend done: worktree cleanup, provider-change approvals (R16), CSRF origin check, pagination, OpenAPI response schemas, outbox dispatcher (lease-based) + context-map resync, checkpoint restore, agent skills. Next: Web UI (B1).
 - 2026-11-10 — README rewritten as a step-by-step guide and verified against a live API. Fixes found while verifying: `.env` was never loaded; relative paths resolved from `apps/api`; user request had no path to the BA (now `request.md` input); missing/unapproved inputs burned retries (now `waiting_for_input`).

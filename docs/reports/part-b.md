@@ -112,6 +112,6 @@ the repository layout, and a troubleshooting row (UI not built when the API star
 |---|------|------|
 | R29 | No automated component tests for the web UI (only build + API hosting tests + the manual-run browser smoke script) | Add Vitest + Testing Library, or run `ui-smoke.mjs` in CI with a browser image |
 | R30 | The smoke script needs a Chromium-based browser and loopback access, so it is not part of `npm run verify` | Keep it as a manual/CI step; `EDGE_PATH` selects the browser |
-| R31 | Web UI has no Playground screen and no provider key rotation form yet (both exist in the API) | Add with the next UI pass |
+| R31 | ~~Web UI has no Playground screen and no provider key rotation form yet~~ | **Done** (follow-up commit): AI models → Playground tab (single run or 2–5 model compare, cost-warning confirmation, results with tokens/latency/estimated cost, save + list benchmarks); Providers tab → "Replace or revoke a key" (masked hint only). Browser smoke 13/13 ok |
 | — | Phase 6 part B (sandbox), P8-03/P8-04, QA agent, P7-10, R14 live provider check | **blocked**: see `docs/HANDOFF.md` §5 |
 | R18 | Dedicated `budget.*` permissions | Needs human approval (RBAC change, Blueprint §20.7) |

@@ -101,7 +101,7 @@ sign in. The UI is served by the API on the same origin, so no CORS/CSRF setting
 | Projects | List and create projects |
 | Project | Write and approve the request (`request.md`), start a workflow run and follow its steps; tasks; artifacts (view, approve a version); approvals (approve, or reject with a comment); live event stream |
 | Task | Lineage: why the task exists, who scheduled it, attempts, model calls and why that model, context given to the agent, tool calls, quality gates, human approvals, code diff of the task branch |
-| AI models | Providers (add with API key, test connection), models and capabilities, agent model assignments ("which model for …?"), budgets |
+| AI models | Providers (add with API key, test connection, replace or revoke the key), models and capabilities, agent model assignments ("which model for …?"), budgets, **Playground** (try one model or compare 2–5 on the same prompt, see output, tokens, latency and estimated cost, save benchmarks; never changes live assignments, asks before expensive runs) |
 | Agents & workflows | Load the agent library, view agents, workflows and skills |
 | Costs | Calls, tokens and estimated cost grouped by agent, model, provider, project or day |
 

@@ -58,6 +58,16 @@ async function waitFor(needle, timeout = 15000) {
   }
   throw new Error(`timed out waiting for "${needle}". Page text:\n${(await text()).slice(0, 1500)}`);
 }
+async function waitForAny(needles, timeout = 30000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const t = (await text()).toLowerCase();
+    const hit = needles.find((n) => t.includes(n.toLowerCase()));
+    if (hit) return hit;
+    await sleep(250);
+  }
+  throw new Error(`timed out waiting for any of ${JSON.stringify(needles)}. Page text:\n${(await text()).slice(0, 1500)}`);
+}
 const go = async (p) => {
   await send('Page.navigate', { url: BASE + p });
   await sleep(500);
@@ -166,12 +176,31 @@ try {
     await click('Budgets');
     await waitFor('Set a budget');
   });
+  await step('AI: replace and revoke a provider key (only a masked hint is shown)', async () => {
+    await click('Providers');
+    await waitFor('Replace or revoke a key');
+    await fill('New API key', 'smoke-test-key-123456');
+    await click('Save key');
+    await waitFor('Key replaced');
+    if ((await text()).includes('smoke-test-key-123456')) throw new Error('plaintext key visible in the page');
+    await evaluate('window.confirm = () => true');
+    await click('Revoke key');
+    await waitFor('Key revoked');
+  });
+  await step('AI: playground run is recorded and shown (result or provider error)', async () => {
+    await click('Playground');
+    await waitFor('No benchmarks saved yet.');
+    await evaluate(`(() => { const l = [...document.querySelectorAll('label')].find(l => l.textContent.includes('qwen2.5-coder')); l.querySelector('input').click(); return true; })()`);
+    await fill('User prompt', 'Say hello.');
+    await click('Run');
+    // No Ollama runs in the smoke environment, so a provider error is the expected outcome; a live one shows results.
+    await waitForAny(['contacting provider', 'Results', 'unknown_error', 'timeout']);
+  });
   await step('costs page', async () => {
     await clickLink('Costs');
     await waitFor('Model calls');
     await waitFor('Estimated cost');
     await waitFor('By agent');
-    await waitFor('No model calls yet.');
     await fill('Group by', 'model');
     await waitFor('By model');
   });

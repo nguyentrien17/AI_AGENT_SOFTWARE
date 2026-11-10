@@ -151,3 +151,28 @@ export interface ProjectEvent {
   payload: Record<string, unknown>;
   createdAt: string;
 }
+
+/** AI Playground (Blueprint §4.7) — isolated runs that never change live agent configurations. */
+export interface PlaygroundRunResult {
+  run: { id: string; modelId: string; output: string | null; error: string | null; comparisonId: string | null; createdAt: string };
+  providerKey: string;
+  modelKey: string;
+  durationMs: number;
+  usage: { inputTokens: number | null; outputTokens: number | null; cachedTokens: number | null; reasoningTokens: number | null };
+  estimatedCost: string | null;
+  currency: string | null;
+  preflightEstimatedCostUsd: string | null;
+  costWarningTriggered: boolean;
+}
+export interface PlaygroundCompareResult {
+  comparisonId: string;
+  results: PlaygroundRunResult[];
+  totalEstimatedCostUsd: string;
+}
+export interface PlaygroundBenchmark {
+  id: string;
+  name: string;
+  runIds: string[];
+  notes: string;
+  createdAt: string;
+}
