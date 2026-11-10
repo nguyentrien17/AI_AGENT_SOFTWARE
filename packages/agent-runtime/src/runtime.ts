@@ -239,6 +239,7 @@ export async function executeAgentTask(deps: AgentRuntimeDeps, ctx: AgentTaskCon
           );
         }
         messages.push({ role: 'assistant', content: invocation.response.text, toolCalls: invocation.response.toolCalls });
+        const awaiting: string[] = [];
         for (const call of invocation.response.toolCalls) {
           const outcome = await executeTool({ db, ...deps.tools }, actor, {
             toolKey: call.name,
@@ -254,6 +255,27 @@ export async function executeAgentTask(deps: AgentRuntimeDeps, ctx: AgentTaskCon
             toolName: call.name,
             content: payload.length > MAX_TOOL_RESULT_CHARS ? `${payload.slice(0, MAX_TOOL_RESULT_CHARS)}…[truncated]` : payload,
           });
+          if (outcome.status === 'approval_required') {
+            awaiting.push(`Human approval ${outcome.approvalId} is required before tool '${call.name}' can run`);
+          }
+        }
+        if (awaiting.length) {
+          // Park the task: a human decides, then the task is rescheduled and the approved call can run once.
+          await record('needs_input', 'approval_required', null);
+          return {
+            status: 'needs_input',
+            summary: 'Waiting for human approval of a high-risk tool call',
+            result: {},
+            outputRefs: [],
+            openQuestions: awaiting,
+            handoffId: null,
+            contextPackageId: built.packageId,
+            invocationIds,
+            modelKey,
+            providerKey,
+            outputRepairs,
+            budget,
+          };
         }
         continue;
       }

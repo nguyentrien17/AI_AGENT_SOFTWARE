@@ -1,0 +1,54 @@
+key: sdlc-default
+name: Default SDLC
+description: |
+  Blueprint §8 lifecycle with adaptive variants (§8.2). Run variables:
+    change_type: new_project | feature | bugfix      (bugfix skips analysis and design)
+    touches_database: true | false                    (database design only when needed)
+  Until the sandbox exists (Phase 6 part B) the implementation stage stops as `blocked` at its
+  build/test gates — by design: completion is never assumed without test evidence.
+definition:
+  stages:
+    - key: requirements
+      agentKey: ba
+      title: Business analysis
+      objective: Analyse the requirement and write user stories with acceptance criteria.
+      when: { var: change_type, in: [new_project, feature] }
+      approval: human
+      nextAgent: architect
+    - key: architecture
+      agentKey: architect
+      title: System design
+      objective: Design the architecture, technology stack and API contracts for the approved requirements.
+      dependsOn: [requirements]
+      when: { var: change_type, in: [new_project, feature] }
+      approval: human
+      nextAgent: developer
+      taskKind: architecture
+      complexity: high
+    - key: database
+      agentKey: database
+      title: Database design
+      objective: Design the schema and the forward and rollback migrations.
+      dependsOn: [architecture]
+      when: { var: touches_database, equals: true }
+      nextAgent: developer
+    - key: implementation
+      agentKey: developer
+      title: Implementation
+      objective: Implement the change with tests in the task branch.
+      dependsOn: [architecture, database]
+      gates: [build, lint, unit_tests]
+      qualityGateCritical: true
+      maxRetries: 3
+    - key: integration
+      kind: integration
+      title: Integration
+      objective: Merge the task branches into the integration branch.
+      dependsOn: [implementation]
+    - key: review
+      agentKey: review
+      title: Code review
+      objective: Review the integrated change against the acceptance criteria and architecture decisions.
+      dependsOn: [integration]
+      approval: human
+      taskKind: critical_review

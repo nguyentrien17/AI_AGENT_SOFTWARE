@@ -30,8 +30,8 @@ Source of truth: `../../ai_agent_software_platform_technical_blueprint (1).md` (
 | 4 — Model Router & Budget | ✅ done (P4-01…P4-09); P4-10 Usage & Costs UI pending | **passed** — [reports/phase-4.md](../reports/phase-4.md) |
 | 5 — Agent Runtime & Orchestration | ✅ done (P5-01…P5-11); P5-12 dashboards pending | **passed** — [reports/phase-5.md](../reports/phase-5.md) |
 | 6 — Tool Executor & Sandbox | 🟡 part A done (P6-01…P6-05 + runtime tool loop); part B (P6-06…P6-10 sandbox) **blocked: no Docker / WSL** | open — [reports/phase-6.md](../reports/phase-6.md) |
-| 7 — Specialized Agents | not started | — |
-| 8 — Quality Gates & Hardening | not started | — |
+| 7 — Specialized Agents | 🟡 partial: BA/Architect/Database/Review/Developer agents, default SDLC workflow, integration stage (P7-08); QA agent, repair loop, sample app **blocked (sandbox)** | open — [reports/phase-7-8-partial.md](../reports/phase-7-8-partial.md) |
+| 8 — Quality Gates & Hardening | 🟡 partial: gate engine, secret scanner, tool-call approvals, lineage API, concurrency tests; dependency scan + migration validation **blocked (sandbox)**; approval UI todo | open — [reports/phase-7-8-partial.md](../reports/phase-7-8-partial.md) |
 | 9 — Advanced (post-MVP) | not started | — |
 
 ## Package Map (implemented)
@@ -50,6 +50,7 @@ Source of truth: `../../ai_agent_software_platform_technical_blueprint (1).md` (
 | `packages/model-router` | routing policy / hard ceilings, hard filters, scoring, fixed/adaptive/hybrid engines, fallback FSM, routed invocation |
 | `packages/agent-runtime` | agent registry + immutable versions, YAML seeding, output contract, agent execution runtime |
 | `packages/tool-executor` | tool catalog + registry sync, 7-dimension permission guard, path jail, fs tools, git worktrees/tools + destructive guard, executor + tool log |
+| `packages/quality-gates` | secret scanner, deterministic gate runner with evidence (sandbox gates report `blocked`) |
 | `packages/orchestration` | task state machine, DAG, gate-guarded completion, workflows + conditional engine, scheduler (leases, recovery, retries, backoff), approvals, event feed |
 | `apps/api` | Fastify HTTP API `/api/v1` |
 

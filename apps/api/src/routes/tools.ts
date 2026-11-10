@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { authorize } from '@platform/iam';
-import { getTask } from '@platform/orchestration';
+import { getTask, getTaskLineage } from '@platform/orchestration';
 import { NotFoundError } from '@platform/shared';
 import { createDefaultToolCatalog, describeTool, getTaskWorkspaceDiff, listToolExecutions } from '@platform/tool-executor';
 import { actorOf } from '../auth-plugin.js';
@@ -23,6 +23,10 @@ export function toolRoutes(app: FastifyInstance, deps: AppDeps) {
     const task = await getTask(db, actorOf(req), req.params.id); // authorizes task.read
     return { items: await listToolExecutions(db, task.id) };
   });
+
+  r.get('/tasks/:id/lineage', { schema: { params: IdParams } }, async (req) =>
+    getTaskLineage(db, actorOf(req), req.params.id, { storageRoot: deps.storage.root }),
+  );
 
   r.get('/tasks/:id/workspace/diff', { schema: { params: IdParams } }, async (req) => {
     const task = await getTask(db, actorOf(req), req.params.id);

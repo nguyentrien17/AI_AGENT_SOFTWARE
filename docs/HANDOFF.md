@@ -4,7 +4,7 @@
 > blueprint or codebase. Update this file every time a task is finished or a decision is made,
 > *before* doing anything else, so work can be picked up by another agent at any moment.
 
-Last updated: 2026-11-10 (Phases 0–5 done; Phase 6 part A done; part B blocked on Docker)
+Last updated: 2026-11-10 (Phases 0–5 done; 6A done; Phase 7/8 non-sandbox items done — next todo: Web UI, R16; see section 5)
 
 ## 1. How to resume in 3 steps
 1. Read section 2 (current task checklist) and section 3 (design decisions for the active phase).
@@ -20,8 +20,8 @@ Reference only when needed:
 
 ## 2. Current state & next step
 
-**Phases 0–5 are complete and their gates passed. Phase 6 part A is done (gate still open).** Reports: `docs/reports/phase-1.md` … `phase-5.md`.
-`npm run verify` = 25 test files / 250 tests green, typecheck + lint + dependency rules clean.
+**Phases 0–5 complete (gates passed). Phase 6 part A done; Phase 7/8 items that need no sandbox done (report `docs/reports/phase-7-8-partial.md`). Gates 6, 7, 8 stay open until a sandbox exists.** Reports: `docs/reports/phase-1.md` … `phase-5.md`.
+`npm run verify` = 28 test files / 268 tests green, typecheck + lint + dependency rules clean.
 Phases 4–6A committed and pushed to `https://github.com/nguyentrien17/AI_AGENT_SOFTWARE` on 2026-11-10 (user request).
 
 ### Phase 6 — part A DONE (report `docs/reports/phase-6.md`); part B blocked. Next: ask the user — install a container runtime for part B, or start Phase 8 pieces / Web UI.
@@ -140,16 +140,30 @@ report `sandbox_unavailable`.
 - Mock provider `fetch` is allowed only in tests and must be labelled TEST-ONLY (Blueprint §20.3).
 - After each phase: write `docs/reports/phase-N.md` in the §20.6 format and update the ledger.
 
-## 5. Backlog
-| Item | Notes |
-|------|-------|
-| Phase 6 | blocked on Docker (section 2) |
-| Phase 7 | Developer + QA agents need Phase 6 tools; BA/Architect/Database/Review already in `agent-library/` |
-| Phase 8, 9 | see roadmap; open risks per phase in `docs/reports/phase-N.md` |
-| Web UI sprint | P1-14 web shell, P2-10 Context Explorer, P3-11 AI Management UI, P4-10 Usage & Costs UI, P5-12 Workflow/Agent dashboards. ADR-010 (React 19 + Vite) is still *Proposed* — needs user approval before starting |
-| Live provider verification | no real API keys / Ollama on host; adapters verified only against fixtures |
+## 5. Pending register — everything not done yet (keep this table current)
+Status: **doing** = in progress this session · **todo** = can be done now · **blocked** = cannot be done, reason given.
+
+| Item | Phase | Status | Why / what is needed |
+|------|-------|--------|----------------------|
+| P8-02 Secret / credential leak scanner | 8 | **done** | `quality-gates/src/secrets.ts`, tests `quality-gates/test/secrets.test.ts` |
+| P8-01 Quality Gate engine (mandatory gates per stage, evidence) | 8 | **done** (non-sandbox gates) | `quality-gates/src/gates.ts`; enforced by `scheduler.ts enforceQualityGates` when `SchedulerDeps.storage` is set; build/lint/test/dep/migration gates return `blocked` (sandbox) |
+| P7-08 Integration stage: merge `task/*` into `integration`, conflict report | 7 | **done** | stage `kind: integration`; `tool-executor/src/integration.ts`; tests `orchestration/test/quality.test.ts` |
+| P8-05 Approval API for high-risk tool calls (R27) | 8 | **done** | `tool-executor/src/approvals.ts` (one approval = one use), runtime parks task as needs_input, `decideApproval` reschedules; test in `orchestration/test/quality.test.ts` |
+| P8-06 Lineage API (Blueprint §17 audit questions) | 8 | **done** | `orchestration/src/lineage.ts`, `GET /tasks/{id}/lineage` (needs `audit.read`); test in `apps/api/test/tools.e2e.test.ts` |
+| P7-07 Default SDLC workflow + Developer agent definition | 7 | **done** | `agent-library/developer.yaml`, `agent-library/workflows/sdlc-default.yaml`, `seedWorkflowLibrary`, `POST /workflows/seed` |
+| P8-07 Concurrency tests (parallel claims, lease races) | 8 | **done** | `orchestration/test/library-concurrency.test.ts` |
+| Web UI: P1-14 shell, P2-10 Context Explorer, P3-11 AI Mgmt, P4-10 Usage & Costs, P5-12 dashboards, P8-05 approval UI | 1–8 | todo | Stack approved (D1, 2026-11-10: React + Vite). Needs `npm install` of UI deps (network) |
+| R16 Approval request for provider change | 4 | todo | After P8-05 approvals |
+| Phase 6 part B: Docker `SandboxAdapter`, limits, runtime images, terminal/test tools, log streaming, container escape tests | 6 | blocked | No Docker/Podman/WSL on host. Needs a container runtime or a remote Linux host |
+| P8-03 Dependency vulnerability scan | 8 | blocked | Must process untrusted project manifests → run inside the sandbox |
+| P8-04 Migration up/down validation | 8 | blocked | Runs generated migrations → sandbox |
+| QA agent + build/test gates, P7-09 test-failure repair loop | 7 | blocked | Needs sandbox to run tests |
+| P7-10 Sample app end-to-end from a prompt (Phase 7 gate), MVP pillar 6 | 7 | blocked | Needs sandbox + a real model API key |
+| R14 Live provider verification | 3 | blocked | Needs a real API key or local Ollama from the user |
+| R19 tokenizer-based token estimate, R20 actual cost from billing APIs, R23 separate worker process, R24 SSE via LISTEN/NOTIFY, R25 prompt caching | — | todo (post-MVP) | Not needed for MVP gates |
 
 ## 6. Session log (newest first)
+- 2026-11-10 — Phase 7/8 without sandbox: secret scanner + gate engine, integration stage, tool-call approvals, lineage API, developer agent + default SDLC workflow, concurrency tests. 268 tests green. Pending register added (§5).
 - 2026-11-10 — Phase 6 part A finished: tool-executor, runtime tool loop, tool API; 250 tests green. Pushed to GitHub on user request.
 - 2026-11-10 — Phase 6A started. Fixed Phase 3 bug: adapters did not replay an assistant turn's tool calls, so providers would reject tool results (`ChatMessage.toolCalls`; test `ai-management/test/tool-history.test.ts`). Tool keys use underscores (`fs_read_file`) because provider function names forbid dots.
 - 2026-11-10 — Phase 5 finished: API routes, SSE, in-process worker, report `docs/reports/phase-5.md`. 198 tests green. Phase 6 blocked: no Docker/WSL on host. Uncommitted.

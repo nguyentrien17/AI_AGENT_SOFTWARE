@@ -328,6 +328,7 @@ describe('Phase 5 gate — agent runtime & orchestration [integration]', () => {
       ['architect', 'created', 1],
       ['ba', 'created', 1],
       ['database', 'created', 1],
+      ['developer', 'created', 1],
       ['review', 'created', 1],
     ]);
     expect((await seedAgentLibrary(conn.db, owner, AGENT_LIBRARY)).every((r) => r.outcome === 'unchanged')).toBe(true);

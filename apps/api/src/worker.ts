@@ -44,7 +44,7 @@ export function startWorker(opts: WorkerOptions): { workerId: string; stop: () =
     let busy = false;
     try {
       const tick = await runWorkerOnce(
-        { db: opts.db, executor, ...(opts.leaseSeconds ? { leaseSeconds: opts.leaseSeconds } : {}) },
+        { db: opts.db, executor, storage: opts.storage, ...(opts.leaseSeconds ? { leaseSeconds: opts.leaseSeconds } : {}) },
         workerId,
       );
       busy = tick.outcome !== 'idle';

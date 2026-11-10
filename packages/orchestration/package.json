@@ -13,7 +13,11 @@
     "@platform/model-router": "*",
     "@platform/observability": "*",
     "@platform/projects": "*",
+    "@platform/quality-gates": "*",
     "@platform/shared": "*",
-    "drizzle-orm": "^0.36.4"
+    "@platform/storage": "*",
+    "@platform/tool-executor": "*",
+    "drizzle-orm": "^0.36.4",
+    "yaml": "^2.6.1"
   }
 }

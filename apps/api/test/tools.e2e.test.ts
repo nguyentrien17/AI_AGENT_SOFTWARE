@@ -203,6 +203,25 @@ describe('Phase 6 part A — agents use tools through the Tool Executor', () => 
     expect(diff).toMatchObject({ branch: `task/${taskId}`, baseBranch: 'main', files: ['source-code/greet.ts'] });
     expect(diff.diff).toContain('+export const greet');
     expect((await call('GET', `/tasks/${detail.steps[0].taskId.replace(/.$/, '0')}/workspace/diff`)).statusCode).toBe(404);
+
+    // P8-06 lineage answers the Blueprint §17 audit questions for this task.
+    const lineage = await ok('GET', `/tasks/${taskId}/lineage`);
+    expect(lineage.why).toMatchObject({ objective: 'Add greet()', stage: { key: 'implement' }, workflowRun: { id: run.id } });
+    expect(lineage.scheduledBy.runStartedBy).toMatchObject({ type: 'user' });
+    expect(lineage.scheduledBy.transitions.map((t: { to: string }) => t.to)).toEqual(['pending', 'ready', 'assigned', 'running', 'completed']);
+    expect(lineage.executions[0]).toMatchObject({ attemptNo: 1, status: 'succeeded', agentKey: 'developer', agentVersion: 1 });
+    expect(lineage.modelInvocations.length).toBe(4);
+    expect(lineage.modelInvocations[0]).toMatchObject({ providerKey: 'tools-provider', modelKey: 'coder', routingExplanation: { router: 'model-router/1' } });
+    expect(lineage.contextPackages).toHaveLength(1);
+    expect(lineage.toolCalls.map((t: { toolKey: string; status: string }) => `${t.toolKey}:${t.status}`)).toEqual([
+      'fs_write_file:succeeded',
+      'fs_read_file:denied',
+      'git_commit:succeeded',
+    ]);
+    expect(lineage.changes.workspace.files).toEqual(['source-code/greet.ts']);
+    expect(lineage.changes.handoffs).toHaveLength(1);
+    expect(Array.isArray(lineage.qualityGates)).toBe(true);
+    expect(lineage.approvals).toEqual([]);
   });
 
   it('stops an agent that loops on tool calls', async () => {

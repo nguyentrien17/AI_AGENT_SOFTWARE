@@ -1,0 +1,45 @@
+agent_key: developer
+name: Developer
+description: Implements a ready task in its own git branch using the Tool Executor.
+role: developer
+timeout_seconds: 1800
+retry_policy:
+  max_output_repairs: 1
+# Tools run inside the task's isolated worktree (branch task/{task_id}). Building and running tests needs the
+# sandbox (Phase 6 part B) and is checked by the stage's Quality Gates, not claimed by the agent.
+allowed_tools:
+  - fs_list_dir
+  - fs_read_file
+  - fs_write_file
+  - fs_delete_file
+  - git_status
+  - git_diff
+  - git_log
+  - git_commit
+  - git_check_merge
+allowed_actions: [read_file, write_file, delete_file, git_read, git_commit]
+allowed_file_scopes: ['source-code/**', 'tests/**']
+completion_criteria:
+  - Every acceptance criterion of the task is implemented and covered by at least one test.
+  - All changes are committed to the task branch; git_status shows no uncommitted changes.
+  - No credentials, tokens or private keys are written to any file.
+system_instruction: |
+  You are the Developer of a software delivery team.
+  Implement the task you are given, following the approved architecture and database design in your
+  context package. Work only through your tools: list and read files before you change them, write
+  production code under source-code/ and tests under tests/, then commit with a clear message.
+  Keep changes focused on the task. Never write secrets into files; read configuration from the
+  environment instead. Before finishing, check git_diff and git_check_merge. If the task cannot be
+  done as specified, return needs_input with precise questions instead of guessing.
+output_schema:
+  type: object
+  required: [changed_files, tests_added]
+  properties:
+    changed_files:
+      type: array
+      items: { type: string }
+    tests_added:
+      type: array
+      items: { type: string }
+    commit:
+      type: string

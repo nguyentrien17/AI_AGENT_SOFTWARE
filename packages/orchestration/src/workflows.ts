@@ -22,6 +22,7 @@ import {
   UnprocessableError,
   ValidationError,
 } from '@platform/shared';
+import { type GateKey, validateGateKeys } from '@platform/quality-gates';
 import { topologicalOrder } from './task-state-machine.js';
 import { transitionTask } from './tasks.js';
 
@@ -37,8 +38,18 @@ export interface StageDefinition {
   key: string;
   title: string;
   objective: string;
-  /** Agent registry key. The model is resolved at run time by the Model Router, never here. */
-  agentKey: string;
+  /**
+   * `agent` (default): executed by the agent named in `agentKey`. `integration`: executed by the platform —
+   * merges the run's finished task branches into the integration branch (Blueprint §8.1 stage 6).
+   */
+  kind?: 'agent' | 'integration';
+  /**
+   * Agent registry key; required for agent stages (enforced by validation). The model is resolved at run
+   * time by the Model Router, never here.
+   */
+  agentKey?: string;
+  /** Extra deterministic Quality Gates (Blueprint §12.2) on top of the defaults for workspace changes. */
+  gates?: GateKey[];
   dependsOn?: string[];
   /** Conditional branching: the stage is skipped when this evaluates to false on the run variables. */
   when?: Condition;
@@ -94,8 +105,17 @@ export function validateWorkflowDefinition(input: unknown): WorkflowDefinition {
     if (typeof s.key !== 'string' || !KEY_RE.test(s.key)) errors.push({ path: `${at}.key`, message: 'invalid key' });
     else if (keys.has(s.key)) errors.push({ path: `${at}.key`, message: `duplicate stage '${s.key}'` });
     else keys.add(s.key);
-    for (const field of ['title', 'objective', 'agentKey'] as const) {
+    if (s.kind !== undefined && s.kind !== 'agent' && s.kind !== 'integration') {
+      errors.push({ path: `${at}.kind`, message: "must be 'agent' or 'integration'" });
+    }
+    const required = s.kind === 'integration' ? (['title', 'objective'] as const) : (['title', 'objective', 'agentKey'] as const);
+    for (const field of required) {
       if (typeof s[field] !== 'string' || !s[field]?.trim()) errors.push({ path: `${at}.${field}`, message: 'required' });
+    }
+    try {
+      validateGateKeys(s.gates);
+    } catch (err) {
+      errors.push({ path: `${at}.gates`, message: err instanceof Error ? err.message : 'invalid' });
     }
     if (s.approval !== undefined && s.approval !== 'none' && s.approval !== 'human') {
       errors.push({ path: `${at}.approval`, message: "must be 'none' or 'human'" });
@@ -279,6 +299,11 @@ export async function publishWorkflowVersion(
   return db.transaction(async (txRaw) => {
     const tx = txRaw as unknown as Db;
     const wf = await loadWorkflow(tx, workspaceOf(actor), workflowId);
+    if (wf.currentVersionId) {
+      // Re-publishing an identical definition is a no-op, which keeps seeding idempotent.
+      const [current] = await tx.select().from(workflowVersions).where(eq(workflowVersions.id, wf.currentVersionId));
+      if (current?.contentHash === hashJson(def)) return current;
+    }
     const version = await insertWorkflowVersion(tx, actor, wf, def);
     await audit(tx, actor, {
       action: 'workflow.version_published',
@@ -344,6 +369,10 @@ export async function startWorkflowRun(
   // Resolve agents up front: a run never starts with a stage nobody can execute.
   const roleOf = new Map<string, string>();
   for (const p of plan.filter((x) => x.active)) {
+    if (p.stage.kind === 'integration') {
+      roleOf.set(p.stage.key, 'orchestrator');
+      continue;
+    }
     const resolved = await resolveAgent(db, workspaceId, { agentKey: p.stage.agentKey });
     if (!resolved) {
       throw new UnprocessableError(

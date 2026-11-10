@@ -17,6 +17,8 @@ export interface PermissionDecision {
   dimensions: DimensionResult[];
   /** First failing dimension, for error messages. */
   reason: string | null;
+  /** Set when a human approval authorized this (otherwise `require_approval`) call. */
+  approvalId?: string;
 }
 
 export interface PermissionInput {

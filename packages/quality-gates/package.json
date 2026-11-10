@@ -1,0 +1,16 @@
+{
+  "name": "@platform/quality-gates",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@platform/db": "*",
+    "@platform/shared": "*",
+    "@platform/storage": "*",
+    "@platform/tool-executor": "*",
+    "drizzle-orm": "^0.36.4"
+  }
+}

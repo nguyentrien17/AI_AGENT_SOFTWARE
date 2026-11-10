@@ -1,3 +1,5 @@
+import { hostname } from 'node:os';
+import path from 'node:path';
 import { and, asc, desc, eq, isNotNull, isNull, lt, lte, or } from 'drizzle-orm';
 import {
   type Agent,
@@ -12,6 +14,8 @@ import {
 import {
   type Db,
   projects,
+  qualityGateEvaluations,
+  repositories,
   taskAssignments,
   taskExecutions,
   taskLeases,
@@ -21,6 +25,9 @@ import {
 } from '@platform/db';
 import { BudgetBlockedError, InvocationHaltedError, RoutingHaltError } from '@platform/model-router';
 import { emitEvent } from '@platform/observability';
+import { DEFAULT_WORKSPACE_GATES, type GateKey, runQualityGates } from '@platform/quality-gates';
+import type { StorageAdapter } from '@platform/storage';
+import { integrateTaskBranches, integrationWorktreeDir } from '@platform/tool-executor';
 import { type Actor, AppError, isAppError, NotFoundError } from '@platform/shared';
 import { HUMAN_APPROVAL_GATE, latestRejectionComment, requestApproval } from './approvals.js';
 import { recordGateEvaluation, type Task, transitionTask } from './tasks.js';
@@ -28,6 +35,7 @@ import type { StageDefinition } from './workflows.js';
 import { syncWorkflowStep, systemPauseRun } from './workflows.js';
 
 export const OUTPUT_CONTRACT_GATE = 'agent_output_contract';
+export const INTEGRATION_GATE = 'integration_merge';
 export const DEFAULT_LEASE_SECONDS = 120;
 
 export type TaskExecution = typeof taskExecutions.$inferSelect;
@@ -38,8 +46,9 @@ export interface TaskClaim {
   execution: TaskExecution;
   workerId: string;
   workspaceId: string;
-  agent: Agent;
-  version: AgentVersion;
+  /** Null for platform-executed stages (integration). */
+  agent: Agent | null;
+  version: AgentVersion | null;
   stage: StageDefinition | null;
   feedback: string | null;
   leaseExpiresAt: Date;
@@ -67,6 +76,11 @@ export interface SchedulerDeps {
   /** Source of jitter; injectable for deterministic tests. */
   random?: () => number;
   backoff?: { baseMs?: number; maxMs?: number };
+  /**
+   * Root storage (repositories, worktrees, evidence blobs). Required for Quality Gates on workspace changes
+   * and for integration stages.
+   */
+  storage?: StorageAdapter;
 }
 
 const SCHEDULER = (workspaceId: string | null): Actor => ({ type: 'system', workspaceId, component: 'scheduler' });
@@ -82,6 +96,9 @@ export function createAgentTaskExecutor(deps: AgentRuntimeDeps): TaskExecutor {
     if (s?.taskKind) hints.taskKind = s.taskKind;
     if (s?.essential !== undefined) hints.essential = s.essential;
     if (s?.qualityGateCritical !== undefined) hints.qualityGateCritical = s.qualityGateCritical;
+    if (!claim.agent || !claim.version) {
+      throw new AgentExecutionError('no_agent', `Stage of task '${claim.task.id}' is not executed by an agent`, false);
+    }
     return executeAgentTask(deps, {
       task: claim.task,
       agent: claim.agent,
@@ -117,6 +134,18 @@ function isUniqueViolation(err: unknown): boolean {
     if ((e as { code?: string }).code === '23505') return true;
   }
   return false;
+}
+
+/** Why the last attempt's work was rejected by a Quality Gate, fed back to the agent. */
+async function latestFailedGateSummary(db: Db, taskId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ gateKey: qualityGateEvaluations.gateKey, evidence: qualityGateEvaluations.evidence })
+    .from(qualityGateEvaluations)
+    .where(and(eq(qualityGateEvaluations.taskId, taskId), eq(qualityGateEvaluations.outcome, 'failed')))
+    .orderBy(desc(qualityGateEvaluations.evaluatedAt), desc(qualityGateEvaluations.id))
+    .limit(1);
+  if (!row) return null;
+  return `Quality gate '${row.gateKey}' failed: ${String(row.evidence['summary'] ?? '')}`;
 }
 
 async function lastFailureMessage(db: Db, taskId: string): Promise<string | null> {
@@ -164,8 +193,11 @@ export async function claimNextTask(
       ? await db.select().from(workflowSteps).where(eq(workflowSteps.id, task.workflowStepId))
       : [];
     const stage = (step?.config as unknown as StageDefinition | undefined) ?? null;
-    const resolved = await resolveAgent(db, workspaceId, { agentKey: stage?.agentKey ?? null, role: task.agentRole });
-    if (!resolved) {
+    const platformStage = stage?.kind === 'integration';
+    const resolved = platformStage
+      ? null
+      : await resolveAgent(db, workspaceId, { agentKey: stage?.agentKey ?? null, role: task.agentRole });
+    if (!platformStage && !resolved) {
       await transitionTask(db, system, task.id, 'blocked', {
         reason: `no active agent registered for '${stage?.agentKey ?? task.agentRole}'`,
       });
@@ -189,7 +221,7 @@ export async function claimNextTask(
             taskId: task.id,
             attemptNo: (last?.no ?? 0) + 1,
             workerId,
-            agentVersionId: resolved.version.id,
+            agentVersionId: resolved?.version.id ?? null,
             startedAt: now,
           })
           .returning();
@@ -200,12 +232,14 @@ export async function claimNextTask(
           expiresAt,
           heartbeatAt: now,
         });
-        await tx.insert(taskAssignments).values({
-          taskId: task.id,
-          agentId: resolved.agent.id,
-          agentVersionId: resolved.version.id,
-          assignedBy: 'scheduler',
-        });
+        if (resolved) {
+          await tx.insert(taskAssignments).values({
+            taskId: task.id,
+            agentId: resolved.agent.id,
+            agentVersionId: resolved.version.id,
+            assignedBy: 'scheduler',
+          });
+        }
         return exec!;
       });
     } catch (err) {
@@ -216,17 +250,20 @@ export async function claimNextTask(
     try {
       await transitionTask(db, system, task.id, 'assigned', { reason: `claimed by ${workerId}` });
       const running = await transitionTask(db, system, task.id, 'running', {
-        reason: `attempt ${execution.attemptNo} by ${resolved.agent.agentKey}@${resolved.version.versionNo}`,
+        reason: `attempt ${execution.attemptNo} by ${resolved ? `${resolved.agent.agentKey}@${resolved.version.versionNo}` : 'platform integration'}`,
       });
       await syncWorkflowStep(db, running, 'running');
-      const feedback = (await latestRejectionComment(db, task.id)) ?? (await lastFailureMessage(db, task.id));
+      const feedback =
+        (await latestRejectionComment(db, task.id)) ??
+        (await lastFailureMessage(db, task.id)) ??
+        (await latestFailedGateSummary(db, task.id));
       return {
         task: running,
         execution,
         workerId,
         workspaceId,
-        agent: resolved.agent,
-        version: resolved.version,
+        agent: resolved?.agent ?? null,
+        version: resolved?.version ?? null,
         stage,
         feedback,
         leaseExpiresAt: expiresAt,
@@ -378,10 +415,66 @@ export type TaskOutcome =
   | 'retry_scheduled'
   | 'failed'
   | 'budget_paused'
+  | 'blocked'
   | 'lease_lost';
 
 /** Applies a successful agent result: gate evidence first, then the status the evidence allows. */
-export async function completeClaim(db: Db, claim: TaskClaim, result: AgentTaskResult, now = new Date()): Promise<TaskOutcome> {
+export interface CompletionOptions {
+  storage?: StorageAdapter;
+  random?: () => number;
+  backoff?: { baseMs?: number; maxMs?: number };
+}
+
+/**
+ * Runs the deterministic Quality Gates for a finished attempt and records their evidence. Returns the
+ * outcome when a gate stops completion, or null when every gate passed (Blueprint §12.1).
+ */
+async function enforceQualityGates(
+  db: Db,
+  claim: TaskClaim,
+  opts: CompletionOptions,
+  now: Date,
+): Promise<TaskOutcome | null> {
+  if (!opts.storage) return null;
+  const { task } = claim;
+  const system = SCHEDULER(claim.workspaceId);
+  const keys = [...new Set<GateKey>([...DEFAULT_WORKSPACE_GATES, ...(claim.stage?.gates ?? [])])];
+  const results = await runQualityGates({ db, storage: opts.storage }, task.id, keys);
+  for (const r of results) {
+    await recordGateEvaluation(db, system, task.id, { gateKey: r.gateKey, outcome: r.outcome, evidence: r.evidence });
+  }
+  const failed = results.filter((r) => r.outcome === 'failed');
+  if (failed.length) {
+    const reason = `quality gates failed: ${failed.map((r) => `${r.gateKey} — ${r.evidence.summary}`).join(' | ')}`;
+    const backoffMs = computeBackoffMs(claim.execution.attemptNo, { ...opts.backoff, ...(opts.random ? { random: opts.random } : {}) });
+    const status = await failAndMaybeRetry(db, system, task, reason.slice(0, 900), now, backoffMs);
+    return status === 'ready' ? 'retry_scheduled' : 'failed';
+  }
+  const stuck = results.filter((r) => r.outcome === 'blocked' || r.outcome === 'requires_approval');
+  if (stuck.length) {
+    const reason = stuck.map((r) => `${r.gateKey} — ${r.evidence.summary}`).join(' | ');
+    await transitionTask(db, system, task.id, 'blocked', { reason: `quality gates cannot pass: ${reason}`.slice(0, 900) });
+    await syncWorkflowStep(db, task, 'waiting_for_input', 'blocked');
+    await emitEvent(db, {
+      type: 'task.needs_intervention',
+      aggregateType: 'task',
+      aggregateId: task.id,
+      workspaceId: claim.workspaceId,
+      projectId: task.projectId,
+      payload: { code: 'quality_gate_blocked', gates: stuck.map((r) => ({ gateKey: r.gateKey, summary: r.evidence.summary })) },
+    });
+    return 'blocked';
+  }
+  return null;
+}
+
+export async function completeClaim(
+  db: Db,
+  claim: TaskClaim,
+  result: AgentTaskResult,
+  now = new Date(),
+  opts: CompletionOptions = {},
+): Promise<TaskOutcome> {
   await closeExecution(
     db,
     claim,
@@ -403,7 +496,7 @@ export async function completeClaim(db: Db, claim: TaskClaim, result: AgentTaskR
   );
   const { task } = claim;
   const system = SCHEDULER(claim.workspaceId);
-  let outcome: TaskOutcome;
+  let outcome: TaskOutcome | null;
 
   if (result.status === 'needs_input') {
     await transitionTask(db, system, task.id, 'waiting_for_input', {
@@ -419,6 +512,8 @@ export async function completeClaim(db: Db, claim: TaskClaim, result: AgentTaskR
       payload: { questions: result.openQuestions },
     });
     outcome = 'waiting_for_input';
+  } else if ((outcome = await enforceQualityGates(db, claim, opts, now)) !== null) {
+    // A gate stopped completion; `outcome` says what happens next.
   } else {
     const evidence = {
       tool: 'agent-runtime',
@@ -548,6 +643,15 @@ export async function runWorkerOnce(deps: SchedulerDeps, workerId: string): Prom
     Math.max(1_000, (leaseSeconds * 1000) / 3),
   );
   try {
+    if (claim.stage?.kind === 'integration') {
+      try {
+        return { outcome: await runIntegrationClaim(deps, claim, now()), taskId: claim.task.id, recovered };
+      } catch (err) {
+        if (err instanceof LeaseLostError) throw err;
+        const outcome = await failClaim(deps.db, claim, err, { now: now() });
+        return { outcome, taskId: claim.task.id, recovered, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
     let result: AgentTaskResult;
     try {
       result = await deps.executor(claim);
@@ -559,7 +663,12 @@ export async function runWorkerOnce(deps: SchedulerDeps, workerId: string): Prom
       });
       return { outcome, taskId: claim.task.id, recovered, error: err instanceof Error ? err.message : String(err) };
     }
-    return { outcome: await completeClaim(deps.db, claim, result, now()), taskId: claim.task.id, recovered };
+    const completion: CompletionOptions = {
+      ...(deps.storage ? { storage: deps.storage } : {}),
+      ...(deps.random ? { random: deps.random } : {}),
+      ...(deps.backoff ? { backoff: deps.backoff } : {}),
+    };
+    return { outcome: await completeClaim(deps.db, claim, result, now(), completion), taskId: claim.task.id, recovered };
   } catch (err) {
     if (err instanceof LeaseLostError) return { outcome: 'lease_lost', taskId: claim.task.id, recovered };
     throw err;
@@ -577,6 +686,78 @@ export async function drainWorker(deps: SchedulerDeps, workerId: string, maxTick
     ticks.push(tick);
   }
   return ticks;
+}
+
+/**
+ * Integration stage (Blueprint §8.1 stage 6, P7-08), executed by the platform: merges the run's completed
+ * task branches into the integration branch. A conflict blocks the task for a human; nothing is lost.
+ */
+async function runIntegrationClaim(deps: SchedulerDeps, claim: TaskClaim, now: Date): Promise<TaskOutcome> {
+  const { db } = deps;
+  if (!deps.storage) {
+    throw new AgentExecutionError('storage_unavailable', 'Integration stages need the scheduler storage root', false);
+  }
+  const { task } = claim;
+  const system = SCHEDULER(claim.workspaceId);
+  const [project] = await db.select().from(projects).where(eq(projects.id, task.projectId)).limit(1);
+  const [repo] = await db.select().from(repositories).where(eq(repositories.projectId, task.projectId)).limit(1);
+  const upstream = task.workflowRunId
+    ? await db
+        .select({ taskId: tasks.id, stage: workflowSteps.config })
+        .from(workflowSteps)
+        .innerJoin(tasks, eq(tasks.id, workflowSteps.taskId))
+        .where(and(eq(workflowSteps.runId, task.workflowRunId), eq(tasks.status, 'completed')))
+        .orderBy(asc(workflowSteps.position))
+    : [];
+  const taskIds = upstream.filter((u) => (u.stage as { kind?: string }).kind !== 'integration').map((u) => u.taskId);
+  const baseBranch = repo?.defaultBranch ?? 'main';
+  const integrationBranch = repo?.integrationBranch ?? 'integration';
+  const result = await integrateTaskBranches({
+    repoDir: path.join(deps.storage.root, project!.storagePath),
+    worktreeDir: integrationWorktreeDir(deps.storage.root, project!.workspaceId, project!.key),
+    baseBranch,
+    integrationBranch,
+    taskIds,
+  });
+  const report = await deps.storage.putBlob(JSON.stringify(result, null, 2));
+  await closeExecution(db, claim, 'succeeded', { result: { integration: result } }, now);
+  const evidence = {
+    tool: 'git merge',
+    toolVersion: 'git',
+    command: `git merge --no-ff ${result.merged.map((m) => m.branch).join(' ')} into ${integrationBranch}`,
+    environmentId: `host:${hostname()}`,
+    gitTreeHash: result.head,
+    logUri: report.uri,
+    summary: result.conflict
+      ? `conflict merging ${result.conflict.branch}: ${result.conflict.files.join(', ')}`
+      : `merged ${result.merged.length} branch(es) into ${integrationBranch}`,
+  };
+  if (result.conflict) {
+    await recordGateEvaluation(db, system, task.id, { gateKey: INTEGRATION_GATE, outcome: 'blocked', evidence });
+    await transitionTask(db, system, task.id, 'blocked', { reason: `integration conflict: ${evidence.summary}`.slice(0, 900) });
+    await syncWorkflowStep(db, task, 'waiting_for_input', 'blocked');
+    await emitEvent(db, {
+      type: 'integration.conflict',
+      aggregateType: 'task',
+      aggregateId: task.id,
+      workspaceId: claim.workspaceId,
+      projectId: task.projectId,
+      payload: { branch: result.conflict.branch, files: result.conflict.files, integrationBranch },
+    });
+    return 'blocked';
+  }
+  await recordGateEvaluation(db, system, task.id, { gateKey: INTEGRATION_GATE, outcome: 'passed', evidence });
+  await transitionTask(db, system, task.id, 'completed', { reason: evidence.summary });
+  await syncWorkflowStep(db, task, 'completed', 'passed');
+  await emitEvent(db, {
+    type: 'integration.completed',
+    aggregateType: 'task',
+    aggregateId: task.id,
+    workspaceId: claim.workspaceId,
+    projectId: task.projectId,
+    payload: { integrationBranch, head: result.head, merged: result.merged.map((m) => m.branch) },
+  });
+  return 'completed';
 }
 
 export async function listTaskExecutions(db: Db, taskId: string): Promise<TaskExecution[]> {

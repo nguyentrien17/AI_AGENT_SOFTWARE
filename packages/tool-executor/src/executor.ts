@@ -16,6 +16,7 @@ import {
 } from '@platform/db';
 import { audit } from '@platform/observability';
 import { type Actor, actorId, AppError, isAppError, redact, sha256Hex } from '@platform/shared';
+import { resolveToolApproval } from './approvals.js';
 import type { ToolCatalog } from './catalog.js';
 import { DestructiveGitError, ensureTaskWorktree, gitDiffAgainstBase } from './git.js';
 import { normalizeToolPath, PathJailError, WorkspaceJail } from './jail.js';
@@ -46,6 +47,8 @@ export interface ToolCallOutcome {
   output: Record<string, unknown> | null;
   error: { code: string; message: string } | null;
   decision: PermissionDecision | null;
+  /** The approval request this call is waiting for, or the approval that authorized it. */
+  approvalId: string | null;
 }
 
 /** The sandbox runtime is not available on this host (Phase 6 part B; ADR-009: no host fallback). */
@@ -130,7 +133,7 @@ export async function executeTool(deps: ToolExecutorDeps, actor: Actor, call: To
   const record = async (
     status: ToolCallStatus,
     decision: PermissionDecision | null,
-    rest: { output?: Record<string, unknown>; error?: { code: string; message: string } } = {},
+    rest: { output?: Record<string, unknown>; error?: { code: string; message: string }; approvalId?: string } = {},
   ): Promise<ToolCallOutcome> => {
     const [row] = await db
       .insert(toolExecutions)
@@ -165,6 +168,7 @@ export async function executeTool(deps: ToolExecutorDeps, actor: Actor, call: To
       output: rest.output ?? null,
       error: rest.error ?? null,
       decision,
+      approvalId: rest.approvalId ?? decision?.approvalId ?? null,
     };
   };
   const deny = (code: string, message: string, decision: PermissionDecision | null = null) =>
@@ -235,9 +239,25 @@ export async function executeTool(deps: ToolExecutorDeps, actor: Actor, call: To
   });
   if (decision.verdict === 'deny') return deny('permission_denied', decision.reason ?? 'denied', decision);
   if (decision.verdict === 'require_approval') {
-    return record('approval_required', decision, {
-      error: { code: 'approval_required', message: decision.reason ?? 'human approval required' },
+    const approval = await resolveToolApproval(db, actor, {
+      projectId: task.projectId,
+      workspaceId: project!.workspaceId,
+      taskId: task.id,
+      toolKey: tool.toolKey,
+      toolInput: call.input,
+      risk: tool.risk,
+      reason: decision.reason ?? 'high-risk tool',
     });
+    if (approval.state === 'pending') {
+      return record('approval_required', decision, {
+        error: {
+          code: 'approval_required',
+          message: `${decision.reason ?? 'human approval required'} (approval ${approval.approvalId})`,
+        },
+        approvalId: approval.approvalId,
+      });
+    }
+    decision.approvalId = approval.approvalId; // approved by a human: usable exactly once
   }
   if (tool.requiresSandbox) {
     const err = new SandboxUnavailableError(tool.toolKey);

@@ -8,3 +8,5 @@ export * from './catalog.js';
 export * from './executor.js';
 export * from './tools/fs.js';
 export * from './tools/git.js';
+export * from './integration.js';
+export * from './approvals.js';

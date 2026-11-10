@@ -493,6 +493,8 @@ export async function recordGateEvaluation(
       environmentId: string;
       gitTreeHash: string | null;
       logUri: string | null;
+      /** Gate-specific details (summary, findings…) kept with the evidence. */
+      [detail: string]: unknown;
     };
   },
 ) {

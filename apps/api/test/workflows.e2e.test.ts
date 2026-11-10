@@ -116,7 +116,7 @@ afterAll(async () => {
 describe('Phase 5 — workflow API', () => {
   it('runs a workflow end to end over HTTP, including the approval gate and the event stream', async () => {
     const seeded = (await ok('POST', '/agents/seed')).items;
-    expect(seeded.map((s: { outcome: string }) => s.outcome)).toEqual(['created', 'created', 'created', 'created']);
+    expect(seeded.map((s: { outcome: string }) => s.outcome)).toEqual(['created', 'created', 'created', 'created', 'created']);
     const agents = (await ok('GET', '/agents')).items;
     const ba = agents.find((a: { agentKey: string }) => a.agentKey === 'ba');
     const v = ba.currentVersion;

@@ -26,6 +26,7 @@ import {
   pauseWorkflowRun,
   publishWorkflowVersion,
   resumeWorkflowRun,
+  seedWorkflowLibrary,
   startWorkflowRun,
 } from '@platform/orchestration';
 import { actorOf } from '../auth-plugin.js';
@@ -131,6 +132,8 @@ export function workflowRoutes(app: FastifyInstance, deps: AppDeps) {
     },
     async (req, reply) => reply.code(201).send(await createWorkflow(db, actorOf(req), req.body)),
   );
+
+  r.post('/workflows/seed', async (req) => ({ items: await seedWorkflowLibrary(db, actorOf(req), libraryDir) }));
 
   r.get('/workflows/:id', { schema: { params: IdParams } }, async (req) =>
     getWorkflow(db, actorOf(req), req.params.id),

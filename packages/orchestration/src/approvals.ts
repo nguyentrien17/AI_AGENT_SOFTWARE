@@ -3,6 +3,7 @@ import { approvals, type Db, projects, tasks } from '@platform/db';
 import { authorize } from '@platform/iam';
 import { audit, emitEvent } from '@platform/observability';
 import { type Actor, actorId, ConflictError, ForbiddenError, NotFoundError, ValidationError } from '@platform/shared';
+import { TOOL_CALL_APPROVAL } from '@platform/tool-executor';
 import { recordGateEvaluation, transitionTask } from './tasks.js';
 import { syncWorkflowStep } from './workflows.js';
 
@@ -150,6 +151,18 @@ export async function decideApproval(
     return row;
   });
 
+  if (decided.kind === TOOL_CALL_APPROVAL && decided.taskId) {
+    // Either way the agent gets another turn: with the approval it can run the call once; after a
+    // rejection the comment is its feedback (latestRejectionComment).
+    const [parked] = await db.select().from(tasks).where(eq(tasks.id, decided.taskId)).limit(1);
+    if (parked?.status === 'waiting_for_input') {
+      await transitionTask(db, APPROVAL_MANAGER(decided.workspaceId), parked.id, 'ready', {
+        reason: `tool call ${input.decision} by ${actor.userId}`,
+      });
+      await syncWorkflowStep(db, parked, 'pending');
+    }
+    return decided;
+  }
   if (decided.kind !== 'workflow_gate' || !decided.taskId) return decided;
   const system = APPROVAL_MANAGER(decided.workspaceId);
   const [task] = await db.select().from(tasks).where(eq(tasks.id, decided.taskId)).limit(1);
