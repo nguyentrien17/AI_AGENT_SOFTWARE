@@ -4,13 +4,15 @@ import { createLogger } from '@platform/observability';
 import { gitAvailable } from '@platform/projects';
 import { LocalStorage } from '@platform/storage';
 import { buildApp } from './app.js';
-import { loadConfig } from './config.js';
+import { loadConfig, loadDotEnv } from './config.js';
 import { startWorker } from './worker.js';
 import { createDefaultToolCatalog, syncToolRegistry } from '@platform/tool-executor';
 
 async function main() {
+  const envFile = loadDotEnv();
   const config = loadConfig();
   const logger = createLogger({ level: config.logLevel, bindings: { service: 'api' } });
+  if (envFile) logger.info('environment loaded', { file: envFile });
   if (!(await gitAvailable())) throw new Error('git is required but was not found on PATH');
 
   const conn = await connect({ url: config.databaseUrl });

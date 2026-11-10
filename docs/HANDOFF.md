@@ -21,7 +21,7 @@ Reference only when needed:
 ## 2. Current state & next step
 
 **Phases 0–5 complete (gates passed). Phase 6 part A done; Phase 7/8 items that need no sandbox done (report `docs/reports/phase-7-8-partial.md`). Gates 6, 7, 8 stay open until a sandbox exists.** Reports: `docs/reports/phase-1.md` … `phase-5.md`.
-`npm run verify` = 28 test files / 268 tests green, typecheck + lint + dependency rules clean.
+`npm run verify` = 29 test files / 271 tests green, typecheck + lint + dependency rules clean.
 Phases 4–6A committed and pushed to `https://github.com/nguyentrien17/AI_AGENT_SOFTWARE` on 2026-11-10 (user request).
 
 ### Phase 6 — part A DONE (report `docs/reports/phase-6.md`); part B blocked. Next: ask the user — install a container runtime for part B, or start Phase 8 pieces / Web UI.
@@ -137,6 +137,9 @@ report `sandbox_unavailable`.
   Triggers / append-only guards go in a separate hand-written migration created with
   `... generate --custom --name <name>`.
 - Every state change: `audit(tx, actor, …)` + `emitEvent(tx, …)` in the same transaction.
+- The API loads `<repo>/.env` itself (`apps/api/src/config.ts loadDotEnv`); relative paths in config resolve from the repo root (npm runs `dev:api` inside `apps/api`).
+- The default workflow reads the user's request from `.ai-context/01-requirements/request.md`; it must be **approved** (explicit inputs use the approved version). A missing/unapproved required input parks the task as `waiting_for_input` (`ContextInputUnavailableError`) without spending retries.
+- README walkthrough is verified live (PowerShell 5.1): body-less POSTs must still send `{}` as JSON.
 - Mock provider `fetch` is allowed only in tests and must be labelled TEST-ONLY (Blueprint §20.3).
 - After each phase: write `docs/reports/phase-N.md` in the §20.6 format and update the ledger.
 
@@ -163,6 +166,7 @@ Status: **doing** = in progress this session · **todo** = can be done now · **
 | R19 tokenizer-based token estimate, R20 actual cost from billing APIs, R23 separate worker process, R24 SSE via LISTEN/NOTIFY, R25 prompt caching | — | todo (post-MVP) | Not needed for MVP gates |
 
 ## 6. Session log (newest first)
+- 2026-11-10 — README rewritten as a step-by-step guide and verified against a live API. Fixes found while verifying: `.env` was never loaded; relative paths resolved from `apps/api`; user request had no path to the BA (now `request.md` input); missing/unapproved inputs burned retries (now `waiting_for_input`).
 - 2026-11-10 — Phase 7/8 without sandbox: secret scanner + gate engine, integration stage, tool-call approvals, lineage API, developer agent + default SDLC workflow, concurrency tests. 268 tests green. Pending register added (§5).
 - 2026-11-10 — Phase 6 part A finished: tool-executor, runtime tool loop, tool API; 250 tests green. Pushed to GitHub on user request.
 - 2026-11-10 — Phase 6A started. Fixed Phase 3 bug: adapters did not replay an assistant turn's tool calls, so providers would reject tool results (`ChatMessage.toolCalls`; test `ai-management/test/tool-history.test.ts`). Tool keys use underscores (`fs_read_file`) because provider function names forbid dots.

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { and, eq, sql } from 'drizzle-orm';
+import { approveArtifactVersion, createArtifact } from '@platform/artifacts';
 import {
   createAgent,
   listAgents,
@@ -61,6 +62,7 @@ import {
   resumeWorkflowRun,
   type SchedulerDeps,
   startWorkflowRun,
+  transitionTask,
   validateWorkflowDefinition,
   type WorkflowDefinition,
 } from '../src/index.js';
@@ -580,6 +582,36 @@ describe('Phase 5 gate — agent runtime & orchestration [integration]', () => {
     expect(tick!.error).toMatch(/cannot write/);
     const [failed] = await listTaskExecutions(conn.db, (await taskOfStage(b.run.id, 'analysis')).id);
     expect(failed!.failure).toMatchObject({ code: 'agent_action_rejected' });
+  });
+
+  it('parks a task whose required input is missing or unapproved, without spending retries', async () => {
+    const inputPath = '.ai-context/01-requirements/request.md';
+    const { run } = await startRun({
+      stages: [stage('analysis', 'ba', { title: 'Analyse request', inputRefs: [{ path: inputPath }], maxRetries: 1 })],
+    });
+    expect((await drainWorker(sched, 'worker-1')).map((t) => t.outcome)).toEqual(['waiting_for_input']);
+    let task = await taskOfStage(run.id, 'analysis');
+    expect(task).toMatchObject({ status: 'waiting_for_input', retryCount: 0 });
+    expect(task.statusReason).toMatch(/Required context artifact .*request\.md.* not found — provide or approve it/);
+    expect(calls).toEqual([]); // no model call was spent
+
+    // Written but not yet approved: still parked, still no retry spent.
+    const { item, version } = await createArtifact({ db: conn.db, storage }, owner, projectId, {
+      path: inputPath,
+      type: 'request',
+      content: '# Request\nBuild a login page.\n',
+    });
+    await transitionTask(conn.db, owner, task.id, 'ready', { reason: 'request written' });
+    expect((await drainWorker(sched, 'worker-1')).map((t) => t.outcome)).toEqual(['waiting_for_input']);
+    task = await taskOfStage(run.id, 'analysis');
+    expect(task).toMatchObject({ status: 'waiting_for_input', retryCount: 0 });
+    expect(task.statusReason).toMatch(/has no approved version/);
+
+    // Approved: the agent runs with the request in its context package.
+    await approveArtifactVersion({ db: conn.db, storage }, owner, item.id, version.versionNo);
+    await transitionTask(conn.db, owner, task.id, 'ready', { reason: 'request approved' });
+    expect((await drainWorker(sched, 'worker-1')).map((t) => t.outcome)).toEqual(['completed']);
+    expect(calls[0]!.body).toContain('Build a login page.');
   });
 
   it('parks a task that needs human input instead of guessing', async () => {

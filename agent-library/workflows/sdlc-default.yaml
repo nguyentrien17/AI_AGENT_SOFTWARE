@@ -1,7 +1,9 @@
 key: sdlc-default
 name: Default SDLC
 description: |
-  Blueprint §8 lifecycle with adaptive variants (§8.2). Run variables:
+  Blueprint §8 lifecycle with adaptive variants (§8.2).
+  Before starting a run, write the request (idea, feature or bug report) to the artifact
+  `.ai-context/01-requirements/request.md` (POST /projects/{id}/artifacts). Run variables:
     change_type: new_project | feature | bugfix      (bugfix skips analysis and design)
     touches_database: true | false                    (database design only when needed)
   Until the sandbox exists (Phase 6 part B) the implementation stage stops as `blocked` at its
@@ -12,6 +14,7 @@ definition:
       agentKey: ba
       title: Business analysis
       objective: Analyse the requirement and write user stories with acceptance criteria.
+      inputRefs: [{ path: .ai-context/01-requirements/request.md }]
       when: { var: change_type, in: [new_project, feature] }
       approval: human
       nextAgent: architect
@@ -36,6 +39,7 @@ definition:
       agentKey: developer
       title: Implementation
       objective: Implement the change with tests in the task branch.
+      inputRefs: [{ path: .ai-context/01-requirements/request.md }]
       dependsOn: [architecture, database]
       gates: [build, lint, unit_tests]
       qualityGateCritical: true

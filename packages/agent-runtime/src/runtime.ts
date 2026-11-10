@@ -67,6 +67,31 @@ export interface AgentTaskResult {
   budget: { worstBand: BudgetBand; haltTriggered: boolean };
 }
 
+/**
+ * A required input of the task is missing, unapproved or unreadable. Retrying cannot help: a human must
+ * provide or approve it, so the scheduler parks the task instead of spending retries.
+ */
+export class ContextInputUnavailableError extends AppError {
+  constructor(detail: string, cause: string) {
+    super({
+      status: 422,
+      code: 'context_input_unavailable',
+      title: 'Required task input unavailable',
+      detail: `${detail} — provide or approve it, then move the task back to 'ready'`,
+      extensions: { cause },
+    });
+  }
+}
+
+function isMissingRequiredInput(err: unknown): boolean {
+  if (!isAppError(err)) return false;
+  return (
+    err.code === 'no_approved_version' ||
+    (err.code === 'not_found' && err.message.startsWith('Required context artifact')) ||
+    (err.code === 'forbidden' && err.message.includes('required input'))
+  );
+}
+
 /** The agent could not produce an acceptable result on this attempt. `retryable` drives the scheduler. */
 export class AgentExecutionError extends AppError {
   readonly retryable: boolean;
@@ -186,10 +211,16 @@ export async function executeAgentTask(deps: AgentRuntimeDeps, ctx: AgentTaskCon
   };
 
   try {
-    const built = await buildContextPackage(adeps, actor, {
-      taskId: task.id,
-      promptVersion: `${agent.agentKey}@${version.versionNo}`,
-    });
+    let built: Awaited<ReturnType<typeof buildContextPackage>>;
+    try {
+      built = await buildContextPackage(adeps, actor, {
+        taskId: task.id,
+        promptVersion: `${agent.agentKey}@${version.versionNo}`,
+      });
+    } catch (err) {
+      if (isMissingRequiredInput(err)) throw new ContextInputUnavailableError((err as Error).message, (err as AppError).code);
+      throw err;
+    }
     contextPackageId = built.packageId;
     const loaded = await loadContextPackage(adeps, actor, built.packageId);
     const untrustedContext = renderUntrustedContext(loaded);

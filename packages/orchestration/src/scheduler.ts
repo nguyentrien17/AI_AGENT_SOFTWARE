@@ -4,6 +4,7 @@ import { and, asc, desc, eq, isNotNull, isNull, lt, lte, or } from 'drizzle-orm'
 import {
   type Agent,
   AgentExecutionError,
+  ContextInputUnavailableError,
   type AgentRuntimeDeps,
   type AgentTaskResult,
   type AgentVersion,
@@ -565,7 +566,8 @@ export async function failClaim(
   const { task } = claim;
   const system = SCHEDULER(claim.workspaceId);
   const budgetBlocked = err instanceof BudgetBlockedError;
-  const needsHuman = err instanceof RoutingHaltError || err instanceof InvocationHaltedError;
+  const needsHuman =
+    err instanceof RoutingHaltError || err instanceof InvocationHaltedError || err instanceof ContextInputUnavailableError;
   const retryable = err instanceof AgentExecutionError ? err.retryable : !budgetBlocked && !needsHuman;
   const message = err instanceof Error ? err.message : String(err);
 

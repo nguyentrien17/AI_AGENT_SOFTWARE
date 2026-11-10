@@ -1,4 +1,13 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/**
+ * Repository root. Relative paths in the configuration are resolved against it, not against the current
+ * directory: `npm run dev:api` runs inside `apps/api`, which would otherwise move `./data` and
+ * `./agent-library` there.
+ */
+export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
 export interface ApiConfig {
   host: string;
@@ -13,8 +22,23 @@ export interface ApiConfig {
   workerIdleMs: number;
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
-  const dataDir = path.resolve(env.PLATFORM_DATA_DIR ?? './data');
+/** Loads `<repo>/.env` into `process.env`. Variables already set in the environment win. */
+export function loadDotEnv(root: string = REPO_ROOT): string | null {
+  const file = path.join(root, '.env');
+  if (!existsSync(file)) return null;
+  process.loadEnvFile(file);
+  return file;
+}
+
+function resolveDatabaseUrl(url: string | undefined, dataDir: string, root: string): string {
+  if (!url) return `pglite://${path.join(dataDir, 'pgdata')}`;
+  const m = /^pglite:\/\/(.*)$/.exec(url);
+  if (!m || m[1] === 'memory' || m[1] === '') return url;
+  return `pglite://${path.resolve(root, m[1]!)}`;
+}
+
+export function loadConfig(env: NodeJS.ProcessEnv = process.env, root: string = REPO_ROOT): ApiConfig {
+  const dataDir = path.resolve(root, env.PLATFORM_DATA_DIR ?? 'data');
   const port = Number(env.PORT ?? 8787);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`Invalid PORT '${env.PORT}'`);
   const logLevel = (env.LOG_LEVEL ?? 'info') as ApiConfig['logLevel'];
@@ -23,12 +47,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   return {
     host: env.HOST ?? '127.0.0.1',
     port,
-    databaseUrl: env.DATABASE_URL ?? `pglite://${path.join(dataDir, 'pgdata')}`,
-    storageRoot: path.resolve(env.PLATFORM_STORAGE_ROOT ?? path.join(dataDir, 'storage')),
+    databaseUrl: resolveDatabaseUrl(env.DATABASE_URL, dataDir, root),
+    storageRoot: path.resolve(root, env.PLATFORM_STORAGE_ROOT ?? path.join(dataDir, 'storage')),
     cookieSecure: (env.COOKIE_SECURE ?? 'false') === 'true',
     logLevel,
     rateLimitPerMinute: Number(env.RATE_LIMIT_PER_MINUTE ?? 600),
-    agentLibraryDir: path.resolve(env.AGENT_LIBRARY_DIR ?? './agent-library'),
+    agentLibraryDir: path.resolve(root, env.AGENT_LIBRARY_DIR ?? 'agent-library'),
     workerEnabled: (env.WORKER_ENABLED ?? 'true') === 'true',
     workerIdleMs: Number(env.WORKER_IDLE_MS ?? 2000),
   };
