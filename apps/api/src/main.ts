@@ -35,6 +35,7 @@ async function main() {
     agentLibraryDir: config.agentLibraryDir,
     toolCatalog,
     allowedOrigins: config.allowedOrigins,
+    ...(config.webDistDir ? { webDistDir: config.webDistDir } : {}),
   });
   const worker = config.workerEnabled
     ? startWorker({ db: conn.db, storage, secretStore, registry: adapterRegistry, toolCatalog, logger, idleMs: config.workerIdleMs })
@@ -51,6 +52,9 @@ async function main() {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
   await app.listen({ host: config.host, port: config.port });
+  logger.info(config.webDistDir ? 'web ui enabled' : 'web ui not built (run npm run build:web)', {
+    url: `http://${config.host}:${config.port}/`,
+  });
   logger.info('api listening', {
     url: `http://${config.host}:${config.port}/api/v1`,
     storageRoot: config.storageRoot,

@@ -19,4 +19,6 @@ export interface AppDeps {
   toolCatalog?: ToolCatalog;
   /** Extra browser origins allowed to change data (CSRF check). Loopback and same-origin are always allowed. */
   allowedOrigins?: string[];
+  /** Built Web UI (`apps/web/dist`) to serve at `/`; omitted = API only. */
+  webDistDir?: string;
 }

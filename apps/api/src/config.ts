@@ -21,6 +21,8 @@ export interface ApiConfig {
   workerEnabled: boolean;
   workerIdleMs: number;
   allowedOrigins: string[];
+  /** Directory of the built Web UI, or null when it has not been built. */
+  webDistDir: string | null;
 }
 
 /** Loads `<repo>/.env` into `process.env`. Variables already set in the environment win. */
@@ -56,6 +58,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, root: string = 
     agentLibraryDir: path.resolve(root, env.AGENT_LIBRARY_DIR ?? 'agent-library'),
     workerEnabled: (env.WORKER_ENABLED ?? 'true') === 'true',
     workerIdleMs: Number(env.WORKER_IDLE_MS ?? 2000),
+    webDistDir: (() => {
+      const dir = path.resolve(root, env.WEB_DIST_DIR ?? 'apps/web/dist');
+      return existsSync(path.join(dir, 'index.html')) ? dir : null;
+    })(),
     allowedOrigins: (env.ALLOWED_ORIGINS ?? '')
       .split(',')
       .map((o) => o.trim())

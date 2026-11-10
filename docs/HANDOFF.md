@@ -4,7 +4,7 @@
 > blueprint or codebase. Update this file every time a task is finished or a decision is made,
 > *before* doing anything else, so work can be picked up by another agent at any moment.
 
-Last updated: 2026-11-10 (Part B backend done; Web UI (B1) in progress — see §4b and §5)
+Last updated: 2026-11-10 (Part B done except one open UI bug: Costs page renders blank — see §2 "Resume here")
 
 ## 1. How to resume in 3 steps
 1. Read section 2 (current task checklist) and section 3 (design decisions for the active phase).
@@ -17,6 +17,26 @@ Reference only when needed:
 - State ledger + package map: `docs/00-index/README.md`
 - Atomic task list per phase + phase gates: `docs/phase-0/08-roadmap.md`
 - Per-phase reports: `docs/reports/phase-N.md`
+
+## 0. RESUME HERE (written at session end, 2026-11-10)
+Part B (user request "làm phần B") is done and pushed, except:
+1. **Open bug — Web UI Costs page renders blank.** `/costs` in the browser shows an empty page; the API call
+   `GET /api/v1/ai/costs/breakdown?groupBy=agent` returns 200 and no JS exception was captured by CDP.
+   Reproduce: `npm run build:web`; start the API on a fresh data dir
+   (`PLATFORM_DATA_DIR=.tmp/ui-check PORT=8797 PLATFORM_MASTER_KEY=<base64 32 bytes> npm run dev:api`), then
+   `node scripts/ui-smoke.mjs http://127.0.0.1:8797` — every step passes up to "costs page". Start by
+   opening http://127.0.0.1:5173/costs with `npm run dev:web` and a real browser console
+   (file: `apps/web/src/pages/Costs.tsx`). After the fix, rerun the smoke script until all steps say `ok`.
+2. Then: update README (Web UI section: `npm run build:web`, then open http://127.0.0.1:8787/; dev mode
+   `npm run dev:web` on :5173), mark B1 done in §5, write `docs/reports/part-b.md` (§20.6 format), commit, push.
+3. After part B: remaining items are blocked (sandbox / API key) — see §5.
+
+Web UI files: `apps/web` (React 19 + Vite 8 + TanStack Query/Router + Tailwind 4). Pages in
+`apps/web/src/pages`: Shell (bootstrap/login/nav), Projects, Project (runs + request editor + start run,
+tasks, artifacts, approvals, live SSE events), Task (lineage), Ai (providers, models, assignments,
+budgets), Agents, Costs. The API serves `apps/web/dist` at `/` (`webDistDir`, env `WEB_DIST_DIR`).
+`npm run verify` now also runs `build:web`; `typecheck` covers `apps/web/tsconfig.json`.
+Browser smoke test (headless Edge via CDP, no deps): `scripts/ui-smoke.mjs`.
 
 ## 2. Current state & next step
 
@@ -162,6 +182,19 @@ B2 CSRF Origin check, cursor pagination, OpenAPI response schemas → B5 outbox 
   created later are reported, and a git branch `restore/<checkpointId>` is created at the checkpoint commit.
 - B7: `agent_skills` (versioned, immutable) seeded from `agent-library/skills/*.yaml`; an agent version
   lists `skills`; the runtime appends the skills' instructions to the trusted system instruction.
+
+### B1 Web UI plan (decided 2026-11-10)
+- `apps/web`: React 19 + Vite + TanStack Query + TanStack Router (code-based routes) + Tailwind v4
+  (ADR-010). shadcn/ui-style components (Button, Card, Input, Badge, Table, Tabs) are written in
+  `apps/web/src/components/ui` — shadcn is copy-in source anyway; no Radix dependency for now.
+- The API serves `apps/web/dist` at `/` when it exists (`@fastify/static`), so UI and API are
+  same-origin (no CSRF exceptions needed). Dev: `npm run dev:web` (Vite on 5173, proxies `/api` to 8787).
+- Web never imports server packages; API types live in `apps/web/src/api/types.ts`.
+- Screens: login/bootstrap · projects (list, create) · project (runs + start run with request editor,
+  tasks, artifacts, approvals, live events) · task (lineage, executions, tool calls, diff) · AI (providers,
+  models, assignments, budgets) · agents/workflows/skills (seed) · costs.
+- Checks: `typecheck` covers `apps/web/tsconfig.json`; a build test makes sure `vite build` succeeds;
+  API test checks `/` serves the UI and `/api` still wins.
 
 ## 5. Pending register — everything not done yet (keep this table current)
 Status: **doing** = in progress this session · **todo** = can be done now · **blocked** = cannot be done, reason given.

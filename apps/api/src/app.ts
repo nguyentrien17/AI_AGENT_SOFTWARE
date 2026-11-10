@@ -1,6 +1,7 @@
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
+import fastifyStatic from '@fastify/static';
 import swagger from '@fastify/swagger';
 import { createLogger } from '@platform/observability';
 import { AppError, isAppError, type ProblemDetails, uuidv7 } from '@platform/shared';
@@ -78,8 +79,12 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       .send({ ...problem, requestId: req.id });
   });
 
-  app.setNotFoundHandler((req, reply) =>
-    reply
+  app.setNotFoundHandler((req, reply) => {
+    // Single-page app: any non-API GET that is not a file gets index.html; the browser router takes over.
+    if (deps.webDistDir && req.method === 'GET' && !req.url.startsWith(API_PREFIX) && !req.url.startsWith('/api/')) {
+      return reply.type('text/html; charset=utf-8').sendFile('index.html');
+    }
+    return reply
       .code(404)
       .type('application/problem+json')
       .send({
@@ -89,8 +94,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         code: 'route_not_found',
         detail: `No route ${req.method} ${req.url}`,
         instance: req.url,
-      }),
-  );
+      });
+  });
 
   app.addHook('onResponse', async (req, reply) => {
     logger.info('request', {
@@ -123,6 +128,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       security: [{ session: [] }],
     },
   });
+
+  if (deps.webDistDir) {
+    // The Web UI is served from the same origin as the API (ADR-010), so no CORS or CSRF exception is needed.
+    await app.register(fastifyStatic, { root: deps.webDistDir, prefix: '/', wildcard: false, index: ['index.html'] });
+  }
 
   await app.register(
     async (api) => {

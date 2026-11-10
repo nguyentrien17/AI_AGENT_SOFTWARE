@@ -11,15 +11,17 @@
     "apps/*"
   ],
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p apps/web/tsconfig.json",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
     "depcheck": "depcruise packages apps --config .dependency-cruiser.cjs",
-    "verify": "npm run typecheck && npm run lint && npm run depcheck && npm test",
-    "dev:api": "npm run dev -w @platform/api"
+    "verify": "npm run typecheck && npm run lint && npm run depcheck && npm test && npm run build:web",
+    "dev:api": "npm run dev -w @platform/api",
+    "dev:web": "npm run dev -w @platform/web",
+    "build:web": "npm run build -w @platform/web"
   },
   "devDependencies": {
     "@eslint/js": "^9.14.0",
