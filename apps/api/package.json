@@ -1,0 +1,29 @@
+{
+  "name": "@platform/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.1",
+    "@fastify/rate-limit": "^10.2.1",
+    "@fastify/swagger": "^9.4.0",
+    "@fastify/type-provider-typebox": "^5.1.0",
+    "@sinclair/typebox": "^0.34.9",
+    "@platform/artifacts": "*",
+    "@platform/db": "*",
+    "@platform/iam": "*",
+    "@platform/observability": "*",
+    "@platform/orchestration": "*",
+    "@platform/projects": "*",
+    "@platform/shared": "*",
+    "@platform/storage": "*",
+    "fastify": "^5.1.0"
+  }
+}

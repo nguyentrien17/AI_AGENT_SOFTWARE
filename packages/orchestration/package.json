@@ -1,0 +1,17 @@
+{
+  "name": "@platform/orchestration",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@platform/iam": "*",
+    "@platform/observability": "*",
+    "drizzle-orm": "^0.36.4",
+    "@platform/shared": "*",
+    "@platform/db": "*",
+    "@platform/projects": "*"
+  }
+}

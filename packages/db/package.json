@@ -1,0 +1,15 @@
+{
+  "name": "@platform/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.2.14",
+    "pg": "^8.13.1",
+    "drizzle-orm": "^0.36.4",
+    "@platform/shared": "*"
+  }
+}

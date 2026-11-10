@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+/data/
+/projects/*
+!/projects/.gitkeep
+.DS_Store
+.tmp/

@@ -1,0 +1,16 @@
+{
+  "name": "@platform/iam",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@platform/db": "*",
+    "@node-rs/argon2": "^2.0.2",
+    "@platform/observability": "*",
+    "drizzle-orm": "^0.36.4",
+    "@platform/shared": "*"
+  }
+}
