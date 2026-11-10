@@ -1,19 +1,22 @@
 import { execFile } from 'node:child_process';
+import { access } from 'node:fs/promises';
+import path from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
+const env = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0' });
 
 /**
  * Platform-level repository initialization (not an agent tool — agent Git access goes through the
  * Tool Executor in Phase 6). Uses argv arrays only; never shell interpolation.
  */
 export async function gitInit(dir: string, defaultBranch = 'main'): Promise<void> {
-  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
-  await run('git', ['init', '-q', '-b', defaultBranch], { cwd: dir, env, timeout: 30_000 });
-  await run('git', ['config', 'user.name', 'AI Agent Platform'], { cwd: dir, env, timeout: 30_000 });
-  await run('git', ['config', 'user.email', 'platform@localhost'], { cwd: dir, env, timeout: 30_000 });
-  await run('git', ['add', '-A'], { cwd: dir, env, timeout: 30_000 });
-  await run('git', ['commit', '-q', '-m', 'chore: initialize project workspace'], { cwd: dir, env, timeout: 30_000 });
+  const opts = { cwd: dir, env: env(), timeout: 30_000 };
+  await run('git', ['init', '-q', '-b', defaultBranch], opts);
+  await run('git', ['config', 'user.name', 'AI Agent Platform'], opts);
+  await run('git', ['config', 'user.email', 'platform@localhost'], opts);
+  await run('git', ['add', '-A'], opts);
+  await run('git', ['commit', '-q', '-m', 'chore: initialize project workspace'], opts);
 }
 
 export async function gitAvailable(): Promise<boolean> {
@@ -23,4 +26,44 @@ export async function gitAvailable(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export async function isGitRepo(dir: string): Promise<boolean> {
+  try {
+    await access(path.join(dir, '.git'));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const locks = new Map<string, Promise<unknown>>();
+
+/** Serializes git operations per repository (git's index lock forbids concurrent writers). */
+async function withRepoLock<T>(dir: string, fn: () => Promise<T>): Promise<T> {
+  const key = path.resolve(dir);
+  const prev = locks.get(key) ?? Promise.resolve();
+  const next = prev.catch(() => undefined).then(fn);
+  locks.set(key, next);
+  try {
+    return await next;
+  } finally {
+    if (locks.get(key) === next) locks.delete(key);
+  }
+}
+
+/**
+ * Commits all workspace changes (if any) and returns the HEAD commit hash. Returns null when the
+ * directory is not a git repository.
+ */
+export async function gitCommitAll(dir: string, message: string): Promise<string | null> {
+  if (!(await isGitRepo(dir))) return null;
+  return withRepoLock(dir, async () => {
+    const opts = { cwd: dir, env: env(), timeout: 60_000 };
+    await run('git', ['add', '-A'], opts);
+    const { stdout: status } = await run('git', ['status', '--porcelain'], opts);
+    if (status.trim()) await run('git', ['commit', '-q', '-m', message], opts);
+    const { stdout } = await run('git', ['rev-parse', 'HEAD'], opts);
+    return stdout.trim();
+  });
 }

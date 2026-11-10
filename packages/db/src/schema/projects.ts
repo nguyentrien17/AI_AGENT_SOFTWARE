@@ -17,6 +17,8 @@ export const projects = pgTable(
     status: projectStatus('status').notNull().default('active'),
     currentStage: text('current_stage').notNull().default('intake'),
     storagePath: text('storage_path').notNull(),
+    /** Monotonic counter incremented on every artifact version/approval (Blueprint §7.5 `context_version`). */
+    contextVersion: integer('context_version').notNull().default(0),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

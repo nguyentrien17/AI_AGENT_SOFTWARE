@@ -1,0 +1,20 @@
+{
+  "name": "@platform/context",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@platform/artifacts": "*",
+    "@platform/db": "*",
+    "@platform/iam": "*",
+    "@platform/observability": "*",
+    "@platform/projects": "*",
+    "@platform/shared": "*",
+    "@platform/storage": "*",
+    "@sinclair/typebox": "^0.34.9",
+    "drizzle-orm": "^0.36.4"
+  }
+}

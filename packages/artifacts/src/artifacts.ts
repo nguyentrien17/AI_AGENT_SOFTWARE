@@ -1,17 +1,26 @@
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
-import { contextItems, contextVersions, type Db, isUniqueViolation, projects } from '@platform/db';
-import { authorize } from '@platform/iam';
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import {
+  contextItems,
+  contextPackages,
+  contextVersions,
+  type Db,
+  isUniqueViolation,
+  projects,
+} from '@platform/db';
 import { audit, emitEvent } from '@platform/observability';
 import {
   type Actor,
   actorId,
   ConflictError,
+  ForbiddenError,
   NotFoundError,
   sha256Hex,
   ValidationError,
   VersionConflictError,
 } from '@platform/shared';
 import { IntegrityError, type StorageAdapter } from '@platform/storage';
+import { authorize } from '@platform/iam';
+import { authorizeArtifactRead, authorizeArtifactWrite, isSystemManagedPath } from './access-policy.js';
 
 export interface ArtifactDeps {
   db: Db;
@@ -20,6 +29,7 @@ export interface ArtifactDeps {
 
 export type ArtifactItem = typeof contextItems.$inferSelect;
 export type ArtifactVersion = typeof contextVersions.$inferSelect;
+type Project = typeof projects.$inferSelect;
 
 /** Artifacts may only live in curated, versioned areas of the project workspace. */
 const ALLOWED_ROOTS = ['.ai-context/', 'documentation/'];
@@ -45,15 +55,15 @@ export function normalizeArtifactPath(p: string): string {
       { path: 'path', message: 'outside curated roots' },
     ]);
   }
-  if (norm.startsWith('.ai-context/00-index/') || norm.endsWith('/.gitkeep')) {
-    throw new ValidationError('Index files are managed by the platform', [
+  if (isSystemManagedPath(norm) || norm.endsWith('/.gitkeep')) {
+    throw new ValidationError('This path is managed by the platform', [
       { path: 'path', message: 'reserved' },
     ]);
   }
   return norm;
 }
 
-async function loadProject(db: Db, projectId: string) {
+async function loadProject(db: Db, projectId: string): Promise<Project> {
   const [p] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
   if (!p) throw new NotFoundError('Project', projectId);
   return p;
@@ -72,12 +82,118 @@ function toBuffer(content: string | Buffer): Buffer {
   return buf;
 }
 
-function blobStore(deps: ArtifactDeps, storagePath: string): StorageAdapter {
-  return deps.storage.scoped(storagePath).scoped('artifacts');
+function blobStore(storage: StorageAdapter, storagePath: string): StorageAdapter {
+  return storage.scoped(storagePath).scoped('artifacts');
 }
 
-async function writeWorkingCopy(deps: ArtifactDeps, storagePath: string, path: string, buf: Buffer) {
-  await deps.storage.scoped(storagePath).writeAtomic(path, buf);
+/** Bumps the project-wide monotonic context version and returns the new value. */
+async function bumpContextVersion(tx: Db, projectId: string): Promise<number> {
+  const [row] = await tx
+    .update(projects)
+    .set({ contextVersion: sql`${projects.contextVersion} + 1` })
+    .where(eq(projects.id, projectId))
+    .returning({ v: projects.contextVersion });
+  return row!.v;
+}
+
+/**
+ * Immediately invalidates every valid context package that watches `path` (Blueprint §7.5: when any underlying
+ * source artifact mutates, dependent cached packages must be invalidated). Runs inside the mutating transaction.
+ */
+export async function invalidatePackagesWatching(
+  tx: Db,
+  projectId: string,
+  path: string,
+  reason: string,
+): Promise<number> {
+  const rows = await tx
+    .update(contextPackages)
+    .set({ invalidatedAt: new Date(), invalidationReason: reason })
+    .where(
+      and(
+        eq(contextPackages.projectId, projectId),
+        isNull(contextPackages.invalidatedAt),
+        sql`${contextPackages.manifest} -> 'watched_paths' @> ${JSON.stringify([path])}::jsonb`,
+      ),
+    )
+    .returning({ id: contextPackages.id });
+  return rows.length;
+}
+
+async function afterMutation(
+  tx: Db,
+  project: Project,
+  item: { id: string; path: string },
+  event: 'artifact.created' | 'artifact.versioned' | 'artifact.approved',
+  payload: Record<string, unknown>,
+) {
+  const contextVersion = await bumpContextVersion(tx, project.id);
+  const invalidated = await invalidatePackagesWatching(tx, project.id, item.path, `${event}: ${item.path}`);
+  await emitEvent(tx, {
+    type: event,
+    aggregateType: 'artifact',
+    aggregateId: item.id,
+    workspaceId: project.workspaceId,
+    projectId: project.id,
+    payload: { path: item.path, ...payload, context_version: contextVersion },
+  });
+  await emitEvent(tx, {
+    type: 'context.updated',
+    aggregateType: 'project',
+    aggregateId: project.id,
+    workspaceId: project.workspaceId,
+    projectId: project.id,
+    payload: { context_version: contextVersion, path: item.path, invalidated_packages: invalidated },
+  });
+}
+
+/**
+ * Regenerates `.ai-context/00-index/context-map.json` from the database (DB is the SSOT for metadata; the file
+ * is a derived, platform-managed index for humans and tooling).
+ */
+export async function syncContextMap(deps: ArtifactDeps, projectId: string): Promise<void> {
+  const project = await loadProject(deps.db, projectId);
+  const items = await deps.db
+    .select()
+    .from(contextItems)
+    .where(eq(contextItems.projectId, projectId))
+    .orderBy(asc(contextItems.path));
+  const versions = items.length
+    ? await deps.db
+        .select({
+          itemId: contextVersions.contextItemId,
+          versionNo: contextVersions.versionNo,
+          sha256: contextVersions.sha256,
+        })
+        .from(contextVersions)
+        .innerJoin(contextItems, eq(contextItems.id, contextVersions.contextItemId))
+        .where(eq(contextItems.projectId, projectId))
+    : [];
+  const sha = (itemId: string, no: number | null) =>
+    no === null ? null : (versions.find((v) => v.itemId === itemId && v.versionNo === no)?.sha256 ?? null);
+  const map = {
+    schema_version: '1.0',
+    project_id: projectId,
+    context_version: project.contextVersion,
+    items: items.map((i) => ({
+      id: i.id,
+      path: i.path,
+      type: i.type,
+      owner_role: i.ownerRole,
+      current_version: i.currentVersionNo,
+      current_sha256: sha(i.id, i.currentVersionNo),
+      approved_version: i.approvedVersionNo,
+      approved_sha256: sha(i.id, i.approvedVersionNo),
+    })),
+  };
+  await deps.storage
+    .scoped(project.storagePath)
+    .writeAtomic('.ai-context/00-index/context-map.json', JSON.stringify(map, null, 2) + '\n');
+}
+
+async function writeWorkingCopy(deps: ArtifactDeps, project: Project, path: string, buf: Buffer) {
+  await deps.storage.scoped(project.storagePath).writeAtomic(path, buf);
+  await syncContextMap(deps, project.id);
 }
 
 export async function createArtifact(
@@ -86,13 +202,13 @@ export async function createArtifact(
   projectId: string,
   input: { path: string; type: string; content: string | Buffer; ownerRole?: string; changeNote?: string },
 ): Promise<{ item: ArtifactItem; version: ArtifactVersion }> {
-  await authorize(deps.db, actor, 'artifact.write', { projectId });
-  const project = await loadProject(deps.db, projectId);
   const path = normalizeArtifactPath(input.path);
+  await authorizeArtifactWrite(deps.db, actor, projectId, path);
+  const project = await loadProject(deps.db, projectId);
   const type = input.type.trim();
   if (!type) throw new ValidationError('Artifact type is required');
   const buf = toBuffer(input.content);
-  const blob = await blobStore(deps, project.storagePath).putBlob(buf);
+  const blob = await blobStore(deps.storage, project.storagePath).putBlob(buf);
 
   let result: { item: ArtifactItem; version: ArtifactVersion };
   try {
@@ -100,7 +216,13 @@ export async function createArtifact(
       const tx = txRaw as unknown as Db;
       const [item] = await tx
         .insert(contextItems)
-        .values({ projectId, path, type, ownerRole: input.ownerRole ?? null, currentVersionNo: 1 })
+        .values({
+          projectId,
+          path,
+          type,
+          ownerRole: input.ownerRole ?? (actor.type === 'agent' ? actor.agentKey : null),
+          currentVersionNo: 1,
+        })
         .returning();
       const [version] = await tx
         .insert(contextVersions)
@@ -122,14 +244,7 @@ export async function createArtifact(
         projectId,
         payload: { path, sha256: blob.sha256 },
       });
-      await emitEvent(tx, {
-        type: 'artifact.created',
-        aggregateType: 'artifact',
-        aggregateId: item!.id,
-        workspaceId: project.workspaceId,
-        projectId,
-        payload: { path, version: 1, sha256: blob.sha256 },
-      });
+      await afterMutation(tx, project, item!, 'artifact.created', { version: 1, sha256: blob.sha256 });
       return { item: item!, version: version! };
     });
   } catch (e) {
@@ -140,7 +255,7 @@ export async function createArtifact(
       );
     throw e;
   }
-  await writeWorkingCopy(deps, project.storagePath, path, buf);
+  await writeWorkingCopy(deps, project, path, buf);
   return result;
 }
 
@@ -155,10 +270,10 @@ export async function createArtifactVersion(
   input: { content: string | Buffer; expectedVersionNo: number; changeNote?: string },
 ): Promise<{ item: ArtifactItem; version: ArtifactVersion }> {
   const item = await loadItem(deps.db, itemId);
-  await authorize(deps.db, actor, 'artifact.write', { projectId: item.projectId });
+  await authorizeArtifactWrite(deps.db, actor, item.projectId, item.path);
   const project = await loadProject(deps.db, item.projectId);
   const buf = toBuffer(input.content);
-  const blob = await blobStore(deps, project.storagePath).putBlob(buf);
+  const blob = await blobStore(deps.storage, project.storagePath).putBlob(buf);
   const nextNo = input.expectedVersionNo + 1;
 
   let result: { item: ArtifactItem; version: ArtifactVersion };
@@ -194,14 +309,7 @@ export async function createArtifactVersion(
         projectId: item.projectId,
         payload: { version: nextNo, sha256: blob.sha256 },
       });
-      await emitEvent(tx, {
-        type: 'artifact.versioned',
-        aggregateType: 'artifact',
-        aggregateId: itemId,
-        workspaceId: project.workspaceId,
-        projectId: item.projectId,
-        payload: { path: item.path, version: nextNo, sha256: blob.sha256 },
-      });
+      await afterMutation(tx, project, item, 'artifact.versioned', { version: nextNo, sha256: blob.sha256 });
       return { item: updated, version: version! };
     });
   } catch (e) {
@@ -211,7 +319,7 @@ export async function createArtifactVersion(
     }
     throw e;
   }
-  await writeWorkingCopy(deps, project.storagePath, item.path, buf);
+  await writeWorkingCopy(deps, project, item.path, buf);
   return result;
 }
 
@@ -223,9 +331,10 @@ export async function approveArtifactVersion(
   versionNo: number,
 ): Promise<ArtifactVersion> {
   const head = await loadItem(deps.db, itemId);
+  if (actor.type !== 'user') throw new ForbiddenError('Only human users can approve artifacts');
   await authorize(deps.db, actor, 'artifact.approve', { projectId: head.projectId });
-  if (actor.type !== 'user') throw new ValidationError('Only human users can approve artifacts');
-  return deps.db.transaction(async (txRaw) => {
+  const project = await loadProject(deps.db, head.projectId);
+  const approved = await deps.db.transaction(async (txRaw) => {
     const tx = txRaw as unknown as Db;
     // Lock the head row so concurrent approvals serialize.
     const [item] = await tx.select().from(contextItems).where(eq(contextItems.id, itemId)).for('update');
@@ -253,7 +362,7 @@ export async function approveArtifactVersion(
           ),
         );
     }
-    const [approved] = await tx
+    const [row] = await tx
       .update(contextVersions)
       .set({ status: 'approved', approvedAt: new Date(), approvedBy: actor.userId })
       .where(eq(contextVersions.id, v.id))
@@ -269,16 +378,11 @@ export async function approveArtifactVersion(
       projectId: item.projectId,
       payload: { version: versionNo, sha256: v.sha256 },
     });
-    await emitEvent(tx, {
-      type: 'artifact.approved',
-      aggregateType: 'artifact',
-      aggregateId: itemId,
-      workspaceId: actor.workspaceId,
-      projectId: item.projectId,
-      payload: { path: item.path, version: versionNo, sha256: v.sha256 },
-    });
-    return approved!;
+    await afterMutation(tx, project, item, 'artifact.approved', { version: versionNo, sha256: v.sha256 });
+    return row!;
   });
+  await syncContextMap(deps, project.id);
+  return approved;
 }
 
 export async function listArtifacts(deps: Pick<ArtifactDeps, 'db'>, actor: Actor, projectId: string) {
@@ -292,18 +396,47 @@ export async function listArtifacts(deps: Pick<ArtifactDeps, 'db'>, actor: Actor
 
 export async function getArtifact(deps: Pick<ArtifactDeps, 'db'>, actor: Actor, itemId: string) {
   const item = await loadItem(deps.db, itemId);
-  await authorize(deps.db, actor, 'artifact.read', { projectId: item.projectId });
+  await authorizeArtifactRead(deps.db, actor, item.projectId, item.path);
   return item;
+}
+
+export async function findArtifactByPath(
+  db: Db,
+  projectId: string,
+  path: string,
+): Promise<ArtifactItem | null> {
+  const [i] = await db
+    .select()
+    .from(contextItems)
+    .where(and(eq(contextItems.projectId, projectId), eq(contextItems.path, path)))
+    .limit(1);
+  return i ?? null;
 }
 
 export async function listArtifactVersions(deps: Pick<ArtifactDeps, 'db'>, actor: Actor, itemId: string) {
   const item = await loadItem(deps.db, itemId);
-  await authorize(deps.db, actor, 'artifact.read', { projectId: item.projectId });
+  await authorizeArtifactRead(deps.db, actor, item.projectId, item.path);
   return deps.db
     .select()
     .from(contextVersions)
     .where(eq(contextVersions.contextItemId, itemId))
     .orderBy(desc(contextVersions.versionNo));
+}
+
+/**
+ * Internal (no authorization): loads a version's bytes from the blob store and verifies the SHA-256 against
+ * the recorded hash. Callers must authorize first.
+ */
+export async function loadVersionContent(
+  storage: StorageAdapter,
+  project: Pick<Project, 'storagePath'>,
+  version: Pick<ArtifactVersion, 'storageUri' | 'sha256' | 'contextItemId' | 'versionNo'>,
+): Promise<Buffer> {
+  const content = await blobStore(storage, project.storagePath).getBlob(version.storageUri);
+  if (sha256Hex(content) !== version.sha256) {
+    throw new IntegrityError(`Artifact ${version.contextItemId}@${version.versionNo} hash mismatch`);
+  }
+  return content;
 }
 
 /** Reads version content from the blob store and verifies it against the DB hash (tamper detection). */
@@ -314,7 +447,7 @@ export async function readArtifactVersion(
   versionNo: number | 'latest' | 'approved',
 ): Promise<{ version: ArtifactVersion; content: Buffer }> {
   const item = await loadItem(deps.db, itemId);
-  await authorize(deps.db, actor, 'artifact.read', { projectId: item.projectId });
+  await authorizeArtifactRead(deps.db, actor, item.projectId, item.path);
   const project = await loadProject(deps.db, item.projectId);
   const no =
     versionNo === 'latest'
@@ -329,7 +462,5 @@ export async function readArtifactVersion(
     .where(and(eq(contextVersions.contextItemId, itemId), eq(contextVersions.versionNo, no)))
     .limit(1);
   if (!v) throw new NotFoundError('Artifact version', `${itemId}@${no}`);
-  const content = await blobStore(deps, project.storagePath).getBlob(v.storageUri);
-  if (sha256Hex(content) !== v.sha256) throw new IntegrityError(`Artifact ${itemId}@${no} hash mismatch`);
-  return { version: v, content };
+  return { version: v, content: await loadVersionContent(deps.storage, project, v) };
 }

@@ -17,6 +17,7 @@
     "@fastify/type-provider-typebox": "^5.1.0",
     "@sinclair/typebox": "^0.34.9",
     "@platform/artifacts": "*",
+    "@platform/context": "*",
     "@platform/db": "*",
     "@platform/iam": "*",
     "@platform/observability": "*",
@@ -24,6 +25,7 @@
     "@platform/projects": "*",
     "@platform/shared": "*",
     "@platform/storage": "*",
+    "drizzle-orm": "^0.36.4",
     "fastify": "^5.1.0"
   }
 }

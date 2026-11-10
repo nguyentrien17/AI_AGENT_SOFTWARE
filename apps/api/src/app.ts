@@ -10,6 +10,7 @@ import { registerIdempotency } from './idempotency.js';
 import { iamRoutes } from './routes/iam.js';
 import { projectRoutes } from './routes/projects.js';
 import { workRoutes } from './routes/work.js';
+import { contextRoutes } from './routes/context.js';
 
 export type { AppDeps };
 
@@ -128,6 +129,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       iamRoutes(api, deps);
       projectRoutes(api, deps);
       workRoutes(api, deps);
+      contextRoutes(api, deps);
     },
     { prefix: API_PREFIX },
   );

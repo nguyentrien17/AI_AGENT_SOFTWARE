@@ -18,7 +18,7 @@ AgentCode/                         # repository root (AI-Software-Platform)
 │   │   └── adapters/              # openai-compatible, gemini, anthropic
 │   ├── model-router/              # precedence resolver, routing engines, fallback FSM
 │   ├── budget/                    # budgets, usage ledger, pricing, thresholds
-│   ├── context/                   # context registry, manager, package builder, cache
+│   ├── context/                   # handoffs, context manager, package builder, cache, memories, checkpoints
 │   ├── agent-runtime/             # registry, versioned definitions, execution runtime, handoffs
 │   ├── orchestration/             # orchestrator, workflow engine, DAG scheduler, leases, checkpoints, approvals
 │   ├── tool-executor/             # tool registry, permission guard, path jail, built-in tools

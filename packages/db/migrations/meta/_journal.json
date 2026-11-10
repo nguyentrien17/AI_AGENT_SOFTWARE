@@ -15,6 +15,20 @@
       "when": 1794280957689,
       "tag": "0001_append_only_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794282422622,
+      "tag": "0002_shared_context",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794282428239,
+      "tag": "0003_context_append_only",
+      "breakpoints": true
     }
   ]
 }
