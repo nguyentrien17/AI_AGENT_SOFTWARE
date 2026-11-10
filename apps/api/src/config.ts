@@ -8,6 +8,9 @@ export interface ApiConfig {
   cookieSecure: boolean;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   rateLimitPerMinute: number;
+  agentLibraryDir: string;
+  workerEnabled: boolean;
+  workerIdleMs: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
@@ -25,5 +28,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     cookieSecure: (env.COOKIE_SECURE ?? 'false') === 'true',
     logLevel,
     rateLimitPerMinute: Number(env.RATE_LIMIT_PER_MINUTE ?? 600),
+    agentLibraryDir: path.resolve(env.AGENT_LIBRARY_DIR ?? './agent-library'),
+    workerEnabled: (env.WORKER_ENABLED ?? 'true') === 'true',
+    workerIdleMs: Number(env.WORKER_IDLE_MS ?? 2000),
   };
 }

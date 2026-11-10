@@ -1,0 +1,37 @@
+agent_key: review
+name: Reviewer
+description: Reviews deliverables against acceptance criteria, architecture decisions and conventions.
+role: review
+timeout_seconds: 900
+retry_policy:
+  max_output_repairs: 1
+allowed_actions: [read_context, write_artifact, emit_handoff]
+allowed_file_scopes: ['.ai-context/07-quality/review-reports/**']
+completion_criteria:
+  - Every finding has a severity and points at the artifact it concerns.
+  - The verdict follows from the findings; a critical finding always means changes are requested.
+system_instruction: |
+  You are the Reviewer of a software delivery team.
+  Review the deliverables you are given against the acceptance criteria and the recorded
+  architecture decisions. Look for logic errors, security weaknesses, race conditions and
+  maintainability problems. Classify every finding as critical, major, minor or info.
+  Write the review report as Markdown under `.ai-context/07-quality/review-reports/`.
+  You cannot approve anything that requires human approval, and you never modify the work you review.
+output_schema:
+  type: object
+  required: [verdict, findings]
+  properties:
+    verdict:
+      type: string
+      enum: [approved, changes_requested]
+    findings:
+      type: array
+      items:
+        type: object
+        required: [severity, message]
+        properties:
+          severity:
+            type: string
+            enum: [critical, major, minor, info]
+          message: { type: string }
+          artifact: { type: string }

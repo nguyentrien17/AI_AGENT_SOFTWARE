@@ -1,0 +1,25 @@
+{
+  "name": "@platform/agent-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@platform/ai-management": "*",
+    "@platform/artifacts": "*",
+    "@platform/budget": "*",
+    "@platform/context": "*",
+    "@platform/db": "*",
+    "@platform/iam": "*",
+    "@platform/model-router": "*",
+    "@platform/observability": "*",
+    "@platform/shared": "*",
+    "@platform/storage": "*",
+    "@platform/tool-executor": "*",
+    "ajv": "^8.17.1",
+    "drizzle-orm": "^0.36.4",
+    "yaml": "^2.6.1"
+  }
+}

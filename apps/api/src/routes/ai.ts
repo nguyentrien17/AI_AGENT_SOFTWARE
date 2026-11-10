@@ -12,7 +12,6 @@ import {
   getCostSummary,
   getModel,
   getProvider,
-  invokeForAgent,
   listAgentModelConfigs,
   listConnectionTests,
   listModels,
@@ -431,45 +430,7 @@ export function aiRoutes(app: FastifyInstance, deps: AppDeps) {
     },
   );
 
-  r.post(
-    '/ai/invocations',
-    {
-      schema: {
-        body: Type.Object(
-          {
-            agentKey: Type.String({ minLength: 1, maxLength: 60 }),
-            agentVersion: Type.Optional(Type.Integer({ minimum: 1 })),
-            projectId: Type.Optional(Uuid),
-            workflowId: Type.Optional(Uuid),
-            taskId: Type.Optional(Uuid),
-            systemInstruction: Type.Optional(Type.String()),
-            untrustedContext: Type.Optional(Type.String()),
-            messages: Type.Array(
-              Type.Object(
-                {
-                  role: Type.Union([
-                    Type.Literal('user'),
-                    Type.Literal('assistant'),
-                    Type.Literal('tool'),
-                  ]),
-                  content: Type.String(),
-                  toolCallId: Type.Optional(Type.String()),
-                  toolName: Type.Optional(Type.String()),
-                },
-                strict,
-              ),
-              { minItems: 1 },
-            ),
-            temperature: Type.Optional(Type.Number({ minimum: 0, maximum: 2 })),
-            maxOutputTokens: Type.Optional(Type.Integer({ minimum: 1, maximum: 2_000_000 })),
-          },
-          strict,
-        ),
-      },
-    },
-    async (req) =>
-      mapAdapterError(invokeForAgent(db, secretStore, registry, actorOf(req), req.body as never)),
-  );
+  // `POST /ai/invocations` is served by the Model Router (routes/router.ts) since Phase 4.
 
   // ------------------------------------------------------------------ Playground
   r.post(

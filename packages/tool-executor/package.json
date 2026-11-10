@@ -1,0 +1,17 @@
+{
+  "name": "@platform/tool-executor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@platform/db": "*",
+    "@platform/iam": "*",
+    "@platform/observability": "*",
+    "@platform/shared": "*",
+    "ajv": "^8.17.1",
+    "drizzle-orm": "^0.36.4"
+  }
+}

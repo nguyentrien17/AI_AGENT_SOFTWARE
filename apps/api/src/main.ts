@@ -1,9 +1,12 @@
+import { createDefaultAdapterRegistry, EnvelopeSecretStore } from '@platform/ai-management';
 import { connect } from '@platform/db';
 import { createLogger } from '@platform/observability';
 import { gitAvailable } from '@platform/projects';
 import { LocalStorage } from '@platform/storage';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
+import { startWorker } from './worker.js';
+import { createDefaultToolCatalog, syncToolRegistry } from '@platform/tool-executor';
 
 async function main() {
   const config = loadConfig();
@@ -14,16 +17,29 @@ async function main() {
   await conn.migrate();
   logger.info('database ready', { driver: conn.driver });
 
+  const storage = new LocalStorage(config.storageRoot);
+  const secretStore = EnvelopeSecretStore.fromEnv();
+  const adapterRegistry = createDefaultAdapterRegistry();
+  const toolCatalog = createDefaultToolCatalog();
+  logger.info('tool registry synced', { tools: await syncToolRegistry(conn.db, toolCatalog) });
   const app = await buildApp({
     db: conn.db,
-    storage: new LocalStorage(config.storageRoot),
+    storage,
     logger,
+    secretStore,
+    adapterRegistry,
     cookieSecure: config.cookieSecure,
     rateLimitPerMinute: config.rateLimitPerMinute,
+    agentLibraryDir: config.agentLibraryDir,
+    toolCatalog,
   });
+  const worker = config.workerEnabled
+    ? startWorker({ db: conn.db, storage, secretStore, registry: adapterRegistry, toolCatalog, logger, idleMs: config.workerIdleMs })
+    : null;
 
   const shutdown = async (signal: string) => {
     logger.info('shutting down', { signal });
+    await worker?.stop();
     await app.close();
     await conn.close();
     process.exit(0);

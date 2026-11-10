@@ -47,6 +47,8 @@ export interface ToolCall {
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'tool';
   content: string;
+  /** Tool calls the model made in this assistant turn; required before the matching `tool` results. */
+  toolCalls?: ToolCall[];
   toolCallId?: string;
   toolName?: string;
 }
@@ -77,6 +79,7 @@ export interface InvocationUsage {
 
 export interface InvocationResponse {
   text: string;
+  /** Parsed JSON when `jsonSchema` was requested and the text parsed; otherwise null (never a provider error). */
   structuredOutput: unknown | null;
   toolCalls: ToolCall[];
   usage: InvocationUsage;

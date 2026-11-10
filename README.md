@@ -3,7 +3,8 @@
 Autonomous multi-agent software engineering platform built from
 [`ai_agent_software_platform_technical_blueprint (1).md`](./ai_agent_software_platform_technical_blueprint%20(1).md).
 
-- **Docs index & state ledger (read first):** [`docs/00-index/README.md`](docs/00-index/README.md)
+- **Resume point for any AI coding agent (read first):** [`docs/HANDOFF.md`](docs/HANDOFF.md)
+- **Docs index & state ledger:** [`docs/00-index/README.md`](docs/00-index/README.md)
 - **Phase 0 artifacts:** [`docs/phase-0/`](docs/phase-0)
 - **Task reports:** [`docs/reports/`](docs/reports)
 

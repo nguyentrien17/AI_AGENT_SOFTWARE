@@ -53,6 +53,8 @@ export const tasks = pgTable(
     timeoutSeconds: integer('timeout_seconds').notNull().default(600),
     maxRetries: integer('max_retries').notNull().default(2),
     retryCount: integer('retry_count').notNull().default(0),
+    /** Earliest time the scheduler may claim the task again (retry backoff, Blueprint §9.4). */
+    notBefore: timestamp('not_before', { withTimezone: true }),
     complexity: taskComplexity('complexity').notNull().default('medium'),
     status: taskStatus('status').notNull().default('draft'),
     statusReason: text('status_reason'),

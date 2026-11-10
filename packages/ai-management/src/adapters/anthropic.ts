@@ -154,14 +154,20 @@ export class AnthropicAdapter implements ProviderAdapter {
     }
     for (const m of req.messages) {
       if (m.role === 'tool') {
+        const block = { type: 'tool_result', tool_use_id: m.toolCallId ?? 'tool_call_0', content: m.content };
+        // All results of one assistant turn belong in a single user message.
+        const prev = messages[messages.length - 1];
+        if (prev?.['role'] === 'user' && Array.isArray(prev['content']) && (prev['content'] as Array<Record<string, unknown>>).every((b) => b['type'] === 'tool_result')) {
+          (prev['content'] as unknown[]).push(block);
+        } else {
+          messages.push({ role: 'user', content: [block] });
+        }
+      } else if (m.role === 'assistant' && m.toolCalls?.length) {
         messages.push({
-          role: 'user',
+          role: 'assistant',
           content: [
-            {
-              type: 'tool_result',
-              tool_use_id: m.toolCallId ?? 'tool_call_0',
-              content: m.content,
-            },
+            ...(m.content ? [{ type: 'text', text: m.content }] : []),
+            ...m.toolCalls.map((c) => ({ type: 'tool_use', id: c.id, name: c.name, input: c.arguments })),
           ],
         });
       } else {
@@ -240,11 +246,9 @@ export class AnthropicAdapter implements ProviderAdapter {
       try {
         structuredOutput = JSON.parse(text);
       } catch {
-        throw new ProviderAdapterError(
-          'unknown_error',
-          'Anthropic response did not parse as valid JSON for requested jsonSchema',
-          { httpStatus: res.status, retryable: true },
-        );
+        // Not a provider failure: the model answered, and its tokens were billed. The caller validates the
+        // text against its own contract (e.g. the agent runtime's bounded output repair).
+        structuredOutput = null;
       }
     }
 

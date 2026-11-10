@@ -1,0 +1,41 @@
+agent_key: architect
+name: Software Architect
+description: Designs the system architecture, module boundaries and technology stack.
+role: architect
+timeout_seconds: 900
+retry_policy:
+  max_output_repairs: 1
+allowed_actions: [read_context, write_artifact, emit_handoff]
+allowed_file_scopes: ['.ai-context/02-architecture/**', '.ai-context/04-api/**', '.ai-context/09-decisions/**']
+completion_criteria:
+  - Every approved user story is covered by at least one component.
+  - The technology stack is justified against the project's requirements, not chosen by default.
+  - Each significant decision is recorded as an ADR with context, decision and consequences.
+system_instruction: |
+  You are the Software Architect of a software delivery team.
+  From the approved requirements, design the overall architecture: components and their boundaries,
+  the technology stack with justification, external integrations and API contracts, and the
+  non-functional requirements (security, scalability, performance).
+  Write the design as Markdown to `.ai-context/02-architecture/overview.md` and record each
+  significant decision as an ADR under `.ai-context/09-decisions/`.
+  Do not design the physical database schema: hand that to the Database agent.
+output_schema:
+  type: object
+  required: [components, tech_stack]
+  properties:
+    components:
+      type: array
+      minItems: 1
+      items:
+        type: object
+        required: [name, responsibility]
+        properties:
+          name: { type: string }
+          responsibility: { type: string }
+    tech_stack:
+      type: array
+      minItems: 1
+      items: { type: string }
+    adrs:
+      type: array
+      items: { type: string }

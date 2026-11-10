@@ -158,15 +158,20 @@ export class GeminiAdapter implements ProviderAdapter {
     }
     for (const m of req.messages) {
       if (m.role === 'tool') {
+        const part = { functionResponse: { name: m.toolName ?? 'tool', response: { result: m.content } } };
+        // All responses of one model turn belong in a single content entry.
+        const prev = contents[contents.length - 1];
+        if (prev?.['role'] === 'user' && (prev['parts'] as Array<Record<string, unknown>>).every((x) => 'functionResponse' in x)) {
+          (prev['parts'] as unknown[]).push(part);
+        } else {
+          contents.push({ role: 'user', parts: [part] });
+        }
+      } else if (m.role === 'assistant' && m.toolCalls?.length) {
         contents.push({
-          role: 'user',
+          role: 'model',
           parts: [
-            {
-              functionResponse: {
-                name: m.toolName ?? 'tool',
-                response: { result: m.content },
-              },
-            },
+            ...(m.content ? [{ text: m.content }] : []),
+            ...m.toolCalls.map((c) => ({ functionCall: { name: c.name, args: c.arguments } })),
           ],
         });
       } else {
@@ -268,11 +273,9 @@ export class GeminiAdapter implements ProviderAdapter {
       try {
         structuredOutput = JSON.parse(text);
       } catch {
-        throw new ProviderAdapterError(
-          'unknown_error',
-          'Gemini response did not parse as valid JSON for requested jsonSchema',
-          { httpStatus: res.status, retryable: true },
-        );
+        // Not a provider failure: the model answered, and its tokens were billed. The caller validates the
+        // text against its own contract (e.g. the agent runtime's bounded output repair).
+        structuredOutput = null;
       }
     }
 

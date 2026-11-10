@@ -125,9 +125,14 @@ interface Candidate {
 type VersionRow = typeof contextVersions.$inferSelect;
 type ItemRow = typeof contextItems.$inferSelect;
 
-/** Hash of the task fields that influence what an agent must do (part of the cache key). */
+/**
+ * Hash of the task identity and the fields that influence what an agent must do (part of the cache key).
+ * The project and task ids are included so a package can never be reused by another task or project.
+ */
 export function taskSpecHash(t: typeof tasks.$inferSelect): string {
   return hashJson({
+    projectId: t.projectId,
+    taskId: t.id,
     title: t.title,
     objective: t.objective,
     inputRefs: t.inputRefs,

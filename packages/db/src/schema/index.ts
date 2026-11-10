@@ -6,3 +6,7 @@ export * from './tasks.js';
 export * from './observability.js';
 export * from './context.js';
 export * from './ai.js';
+export * from './budgets.js';
+export * from './agents.js';
+export * from './workflows.js';
+export * from './tools.js';

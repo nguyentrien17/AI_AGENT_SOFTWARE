@@ -164,6 +164,16 @@ export class OpenAiCompatibleAdapter implements ProviderAdapter {
           content: m.content,
           tool_call_id: m.toolCallId ?? 'tool_call_0',
         });
+      } else if (m.role === 'assistant' && m.toolCalls?.length) {
+        messages.push({
+          role: 'assistant',
+          content: m.content || null,
+          tool_calls: m.toolCalls.map((c) => ({
+            id: c.id,
+            type: 'function',
+            function: { name: c.name, arguments: JSON.stringify(c.arguments) },
+          })),
+        });
       } else {
         messages.push({ role: m.role, content: m.content });
       }
@@ -263,11 +273,9 @@ export class OpenAiCompatibleAdapter implements ProviderAdapter {
       try {
         structuredOutput = JSON.parse(content);
       } catch {
-        throw new ProviderAdapterError(
-          'unknown_error',
-          'Model response did not parse as valid JSON for requested jsonSchema',
-          { httpStatus: res.status, retryable: true },
-        );
+        // Not a provider failure: the model answered, and its tokens were billed. The caller validates the
+        // text against its own contract (e.g. the agent runtime's bounded output repair).
+        structuredOutput = null;
       }
     }
 

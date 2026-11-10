@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { canRoleRead, canRoleWrite, isSystemManagedPath } from '@platform/artifacts';
 import {
   computeCacheKey,
+  taskSpecHash,
   estimateTokens,
   renderUntrustedContext,
   validateHandoffShape,
@@ -95,6 +96,22 @@ describe('cache key, tokens and rendering', () => {
     'changes when %s changes',
     (k) => expect(computeCacheKey({ ...base, [k]: 'other' })).not.toBe(computeCacheKey(base)),
   );
+  it('never lets two tasks share a package, even with an identical specification', () => {
+    const spec = {
+      id: 'task-1',
+      projectId: 'project-1',
+      title: 'Analyse',
+      objective: 'Write requirements',
+      inputRefs: [],
+      expectedOutput: {},
+      acceptanceCriteria: [],
+      agentRole: 'ba',
+      allowedTools: [],
+    } as unknown as Parameters<typeof taskSpecHash>[0];
+    expect(taskSpecHash({ ...spec, id: 'task-2' })).not.toBe(taskSpecHash(spec));
+    expect(taskSpecHash({ ...spec, projectId: 'project-2' })).not.toBe(taskSpecHash(spec));
+    expect(taskSpecHash({ ...spec })).toBe(taskSpecHash(spec));
+  });
   it('changes when an artifact hash changes', () => {
     expect(computeCacheKey({ ...base, artifactHashes: ['a:1', 'b:3'] })).not.toBe(computeCacheKey(base));
   });

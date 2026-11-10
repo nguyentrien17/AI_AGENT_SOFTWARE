@@ -243,19 +243,23 @@ export const agentModelConfigHistory = pgTable(
   (t) => [uniqueIndex('agent_model_config_history_uq').on(t.configId, t.configVersion)],
 );
 
-/** Reserved for Phase 4 routing policies; persisted now so configurations can reference them. */
-export const modelRoutingPolicies = pgTable('model_routing_policies', {
-  id: id(),
-  workspaceId: uuid('workspace_id')
-    .notNull()
-    .references(() => workspaces.id, { onDelete: 'cascade' }),
-  name: text('name').notNull(),
-  rules: jsonb('rules').$type<Record<string, unknown>>().notNull().default({}),
-  hardCeilings: jsonb('hard_ceilings').$type<Record<string, unknown>>().notNull().default({}),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-  version: version(),
-});
+/** Workspace routing policies (Phase 4). The row named `default` supplies hard ceilings no scope can override. */
+export const modelRoutingPolicies = pgTable(
+  'model_routing_policies',
+  {
+    id: id(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    rules: jsonb('rules').$type<Record<string, unknown>>().notNull().default({}),
+    hardCeilings: jsonb('hard_ceilings').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    version: version(),
+  },
+  (t) => [uniqueIndex('model_routing_policies_ws_name_uq').on(t.workspaceId, t.name)],
+);
 
 export const probeResult = pgEnum('probe_result', [
   'connection_successful',
