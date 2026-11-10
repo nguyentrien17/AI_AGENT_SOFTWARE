@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { get } from '../api/client';
 import type { CostBreakdown } from '../api/types';
-import { Card, ErrorNote, Muted, Select, Table, Td } from '../components/ui';
+import { Card, ErrorNote, Label, Muted, Select, Table, Td } from '../components/ui';
 
 const GROUPS = ['agent', 'model', 'provider', 'project', 'day'] as const;
 
@@ -15,9 +15,11 @@ export function CostsPage() {
       <div className="flex items-center gap-3">
         <h1 className="text-xl font-semibold">Costs</h1>
         <div className="ml-auto w-48">
-          <Select value={groupBy} onChange={(e) => setGroupBy(e.target.value as (typeof GROUPS)[number])}>
-            {GROUPS.map((g) => <option key={g} value={g}>by {g}</option>)}
-          </Select>
+          <Label text="Group by">
+            <Select value={groupBy} onChange={(e) => setGroupBy(e.target.value as (typeof GROUPS)[number])}>
+              {GROUPS.map((g) => <option key={g} value={g}>by {g}</option>)}
+            </Select>
+          </Label>
         </div>
       </div>
       <ErrorNote error={data.error} />

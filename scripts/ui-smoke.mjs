@@ -49,10 +49,11 @@ const evaluate = async (expression) => {
   return r.result?.result?.value;
 };
 const text = () => evaluate('document.body.innerText');
+// Case-insensitive: innerText applies CSS `text-transform` (e.g. Tailwind `uppercase` labels read "MODEL CALLS").
 async function waitFor(needle, timeout = 15000) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
-    if ((await text()).includes(needle)) return;
+    if ((await text()).toLowerCase().includes(needle.toLowerCase())) return;
     await sleep(200);
   }
   throw new Error(`timed out waiting for "${needle}". Page text:\n${(await text()).slice(0, 1500)}`);
@@ -168,6 +169,11 @@ try {
   await step('costs page', async () => {
     await clickLink('Costs');
     await waitFor('Model calls');
+    await waitFor('Estimated cost');
+    await waitFor('By agent');
+    await waitFor('No model calls yet.');
+    await fill('Group by', 'model');
+    await waitFor('By model');
   });
   await step('sign out returns to sign in', async () => {
     await click('Sign out');

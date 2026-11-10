@@ -38,7 +38,7 @@ This README explains how to install, run and use it. For design details see [Doc
 | Agent tools: file + git tools in an isolated git worktree per task, 7-dimension permission check | ✅ |
 | Quality gates: secret scanning, merge-conflict check, integration stage, lineage/audit API | ✅ |
 | **Running builds and tests of generated code** (sandbox) | ❌ needs Docker — not done yet |
-| **Web user interface** | ❌ not built yet — use the HTTP API (examples below) |
+| Web user interface (projects, runs, tasks, artifacts, approvals, live events, lineage, AI models, budgets, agents, costs) | ✅ see [3.4](#34-open-the-web-interface) |
 
 What this means in practice: agents can analyse, design, write and commit code and get it reviewed, but
 the implementation stage of the default workflow stops as **`blocked`** at its build/test gates until the
@@ -87,9 +87,36 @@ and applies all migrations. The same process also runs the **worker** that execu
 Check it: open http://127.0.0.1:8787/api/v1/health → `{"status":"ok"}`.
 The complete API description (OpenAPI 3.1) is at http://127.0.0.1:8787/api/v1/openapi.json.
 
+### 3.4 Open the web interface
+```powershell
+npm run build:web     # builds apps/web into apps/web/dist (before starting the API the first time)
+npm run dev:api       # the API serves the built UI at /
+```
+Open **http://127.0.0.1:8787/**. On first start it asks you to create the owner account; afterwards you
+sign in. The UI is served by the API on the same origin, so no CORS/CSRF settings are needed (set
+`WEB_DIST_DIR` to serve a build from another folder). Paths under `/api` always go to the API.
+
+| Page | What you can do |
+|------|-----------------|
+| Projects | List and create projects |
+| Project | Write and approve the request (`request.md`), start a workflow run and follow its steps; tasks; artifacts (view, approve a version); approvals (approve, or reject with a comment); live event stream |
+| Task | Lineage: why the task exists, who scheduled it, attempts, model calls and why that model, context given to the agent, tool calls, quality gates, human approvals, code diff of the task branch |
+| AI models | Providers (add with API key, test connection), models and capabilities, agent model assignments ("which model for …?"), budgets |
+| Agents & workflows | Load the agent library, view agents, workflows and skills |
+| Costs | Calls, tokens and estimated cost grouped by agent, model, provider, project or day |
+
+**UI development** (hot reload): keep `npm run dev:api` running and start `npm run dev:web` in a second
+window, then open http://127.0.0.1:5173 — Vite proxies `/api` to port 8787.
+
+**Browser smoke test** (headless Microsoft Edge through the DevTools protocol, no extra packages): start an
+API with a fresh data folder and the UI built, then run
+`node scripts/ui-smoke.mjs http://127.0.0.1:<port>`. Every step must print `ok`. Use `EDGE_PATH` to point
+at another Chromium-based browser.
+
 ## 4. Walkthrough: from zero to a running workflow
 
-All examples use PowerShell and keep the login cookie in `$s`. Run them in order in one PowerShell window.
+Everything below can also be done in the web interface ([3.4](#34-open-the-web-interface)). The HTTP
+examples use PowerShell and keep the login cookie in `$s`. Run them in order in one PowerShell window.
 
 ```powershell
 $api = 'http://127.0.0.1:8787/api/v1'
@@ -248,6 +275,7 @@ Set in `<repo>/.env` or the shell. Relative paths are resolved from the reposito
 | `AGENT_LIBRARY_DIR` | `./agent-library` | Source of `POST /agents/seed` and `POST /workflows/seed` |
 | `WORKER_ENABLED` | `true` | Run the task worker inside the API process |
 | `WORKER_IDLE_MS` | `2000` | Worker poll interval when idle |
+| `WEB_DIST_DIR` | `apps/web/dist` | Built web UI served at `/` (nothing is served there if the folder does not exist) |
 
 Rotating the master key: set the new key as `PLATFORM_MASTER_KEY`, bump `PLATFORM_MASTER_KEY_VERSION`, and
 list the old one in `PLATFORM_MASTER_KEY_PREVIOUS` until every provider key has been re-saved.
@@ -337,7 +365,8 @@ key or network is needed. CI (`.github/workflows/ci.yml`) runs the same checks o
 
 ### Repository layout
 ```
-apps/api/                 HTTP API (Fastify) + in-process worker
+apps/api/                 HTTP API (Fastify) + in-process worker; serves the built web UI at /
+apps/web/                 Web UI (React 19 + Vite + TanStack Query/Router + Tailwind 4)
 packages/
   shared  db  storage  observability  iam      foundations: ids, errors, schema/migrations, storage, logging, RBAC
   projects  artifacts  context                 projects, versioned artifacts, context packages, handoffs, checkpoints
@@ -377,6 +406,7 @@ explicit `timestamp('<name>')` — the `createdAt()` helper always names its col
 | Implementation ends `blocked` with `sandbox_unavailable` | Expected until the sandbox is built — see [Status](#1-status-what-works-today) |
 | `budget_blocked` | A budget is exhausted: raise it with `PUT /budgets`, then resume the run (`POST /workflow-runs/{id}/resume`) |
 | Port 8787 in use | Set `PORT` in `.env` |
+| http://127.0.0.1:8787/ answers `route_not_found` | The UI was not built when the API started. Run `npm run build:web`, then restart the API |
 | Start over with an empty platform | Stop the API and delete the `data/` folder (this deletes all projects and keys) |
 
 ## Documentation
