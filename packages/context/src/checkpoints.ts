@@ -1,12 +1,13 @@
 import { and, asc, desc, eq } from 'drizzle-orm';
-import { loadVersionContent, type ArtifactDeps } from '@platform/artifacts';
+import { createArtifactVersion, loadVersionContent, type ArtifactDeps } from '@platform/artifacts';
 import { checkpoints, contextItems, contextVersions, type Db, projects, tasks } from '@platform/db';
 import { authorize } from '@platform/iam';
 import { audit, emitEvent } from '@platform/observability';
-import { gitCommitAll } from '@platform/projects';
+import { gitCommitAll, gitCreateBranchAt } from '@platform/projects';
 import {
   type Actor,
   actorId,
+  ConflictError,
   ForbiddenError,
   hashJson,
   NotFoundError,
@@ -219,4 +220,105 @@ export async function verifyCheckpoint(deps: ArtifactDeps, actor: Actor, checkpo
     checkpoint: cp,
     verification: { valid: problems.length === 0, problems } satisfies CheckpointVerification,
   };
+}
+
+export interface RestoreReport {
+  checkpointId: string;
+  /** Artifacts that got a new version carrying the checkpoint content. */
+  restored: Array<{ path: string; checkpointVersion: number; previousVersion: number; newVersion: number }>;
+  unchanged: number;
+  /** Artifacts created after the checkpoint. History is never deleted: they are only reported. */
+  addedSince: string[];
+  /** Task status then vs now. Task states are not rewritten (they follow the task state machine). */
+  taskDifferences: Array<{ id: string; then: string; now: string | null }>;
+  /** Branch created at the checkpoint's git commit, if any. */
+  gitBranch: string | null;
+}
+
+/**
+ * Restores a project's context to a checkpoint (Phase 2 risk R9) without destroying history: every artifact
+ * whose current version differs gets a new version with the checkpoint's content, the code at the
+ * checkpoint is exposed on branch `restore/<checkpointId>`, and everything that cannot be reverted safely
+ * (artifacts added later, task states) is reported for a human to decide. Humans only; the checkpoint must
+ * verify first.
+ */
+export async function restoreCheckpoint(deps: ArtifactDeps, actor: Actor, checkpointId: string): Promise<RestoreReport> {
+  if (actor.type !== 'user') throw new ForbiddenError('Only a human may restore a checkpoint');
+  const [cp] = await deps.db.select().from(checkpoints).where(eq(checkpoints.id, checkpointId)).limit(1);
+  if (!cp) throw new NotFoundError('Checkpoint', checkpointId);
+  await authorizeCheckpoint(deps.db, actor, cp.projectId, 'write');
+  const { verification } = await verifyCheckpoint(deps, actor, checkpointId);
+  if (!verification.valid) {
+    throw new ConflictError(
+      `Checkpoint cannot be restored: ${verification.problems.map((p) => `${p.path} ${p.problem}`).join('; ')}`,
+      'checkpoint_invalid',
+    );
+  }
+  const [project] = await deps.db.select().from(projects).where(eq(projects.id, cp.projectId)).limit(1);
+  const state = cp.state as unknown as CheckpointState;
+  const system: Actor = { type: 'system', workspaceId: project!.workspaceId, component: 'checkpoint-restore' };
+  const report: RestoreReport = { checkpointId, restored: [], unchanged: 0, addedSince: [], taskDifferences: [], gitBranch: null };
+
+  for (const a of state.artifacts) {
+    const [item] = await deps.db.select().from(contextItems).where(eq(contextItems.id, a.item_id)).limit(1);
+    if (!item) continue;
+    // Compare content, not version numbers: after a restore the content matches under a newer version.
+    const [current] = await deps.db
+      .select({ sha256: contextVersions.sha256 })
+      .from(contextVersions)
+      .where(and(eq(contextVersions.contextItemId, item.id), eq(contextVersions.versionNo, item.currentVersionNo)))
+      .limit(1);
+    if (current?.sha256 === a.current_sha256) {
+      report.unchanged++;
+      continue;
+    }
+    const [v] = await deps.db
+      .select()
+      .from(contextVersions)
+      .where(and(eq(contextVersions.contextItemId, a.item_id), eq(contextVersions.versionNo, a.current_version)))
+      .limit(1);
+    const content = await loadVersionContent(deps.storage, project!, v!);
+    const { version } = await createArtifactVersion(deps, system, item.id, {
+      content,
+      expectedVersionNo: item.currentVersionNo,
+      changeNote: `restored from checkpoint ${checkpointId} (v${a.current_version})`,
+    });
+    report.restored.push({ path: a.path, checkpointVersion: a.current_version, previousVersion: item.currentVersionNo, newVersion: version.versionNo });
+  }
+
+  const known = new Set(state.artifacts.map((a) => a.item_id));
+  const items = await deps.db.select({ id: contextItems.id, path: contextItems.path }).from(contextItems).where(eq(contextItems.projectId, cp.projectId));
+  report.addedSince = items.filter((i) => !known.has(i.id)).map((i) => i.path).sort();
+
+  const nowTasks = new Map(
+    (await deps.db.select({ id: tasks.id, status: tasks.status }).from(tasks).where(eq(tasks.projectId, cp.projectId))).map((t) => [t.id, t.status]),
+  );
+  for (const t of state.tasks) {
+    const now = nowTasks.get(t.id) ?? null;
+    if (now !== t.status) report.taskDifferences.push({ id: t.id, then: t.status, now });
+  }
+
+  if (cp.gitCommit) {
+    const branch = `restore/${checkpointId}`;
+    const repoDir = deps.storage.scoped(project!.storagePath).root;
+    await gitCreateBranchAt(repoDir, branch, cp.gitCommit);
+    report.gitBranch = branch;
+  }
+
+  await audit(deps.db, actor, {
+    action: 'checkpoint.restore',
+    targetType: 'checkpoint',
+    targetId: checkpointId,
+    projectId: cp.projectId,
+    payload: { restored: report.restored.length, addedSince: report.addedSince.length, gitBranch: report.gitBranch },
+  });
+  await emitEvent(deps.db, {
+    type: 'checkpoint.restored',
+    aggregateType: 'checkpoint',
+    aggregateId: checkpointId,
+    workspaceId: project!.workspaceId,
+    projectId: cp.projectId,
+    payload: { restored: report.restored.map((r) => r.path), gitBranch: report.gitBranch },
+  });
+  return report;
 }

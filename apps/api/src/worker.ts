@@ -1,12 +1,13 @@
 import { hostname } from 'node:os';
 import type { ProviderAdapterRegistry, SecretStore } from '@platform/ai-management';
 import type { Db } from '@platform/db';
-import type { Logger } from '@platform/observability';
+import { dispatchOutboxBatch, type Logger } from '@platform/observability';
 import { createAgentTaskExecutor, runWorkerOnce } from '@platform/orchestration';
 import { uuidv7 } from '@platform/shared';
 import type { StorageAdapter } from '@platform/storage';
 import type { ToolCatalog } from '@platform/tool-executor';
 import { createBudgetHaltHandler } from './budget-halt.js';
+import { createOutboxHandlers } from './outbox-handlers.js';
 
 export interface WorkerOptions {
   db: Db;
@@ -34,6 +35,7 @@ export function startWorker(opts: WorkerOptions): { workerId: string; stop: () =
     onBudgetHalt: createBudgetHaltHandler(opts.db, opts.storage),
     tools: { storageRoot: opts.storage.root, catalog: opts.toolCatalog },
   });
+  const outboxHandlers = createOutboxHandlers(opts.db, opts.storage);
   const idleMs = opts.idleMs ?? 2_000;
   let stopped = false;
   let timer: NodeJS.Timeout | null = null;
@@ -54,6 +56,13 @@ export function startWorker(opts: WorkerOptions): { workerId: string; stop: () =
       }
     } catch (err) {
       opts.logger.error('worker tick failed', { workerId, err });
+    }
+    try {
+      const out = await dispatchOutboxBatch(opts.db, outboxHandlers);
+      if (out.dispatched === 50) busy = true; // a full batch: more may be waiting
+      if (out.failed) opts.logger.warn('outbox events failed permanently', { workerId, failed: out.failed });
+    } catch (err) {
+      opts.logger.error('outbox dispatch failed', { workerId, err });
     }
     if (!stopped) timer = setTimeout(() => (current = loop()), busy ? 0 : idleMs);
   };

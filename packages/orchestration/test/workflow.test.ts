@@ -10,7 +10,9 @@ import {
   createAgent,
   listAgents,
   listAgentVersions,
+  listSkills,
   publishAgentVersion,
+  publishSkill,
   seedAgentLibrary,
 } from '@platform/agent-runtime';
 import {
@@ -354,6 +356,17 @@ describe('Phase 5 gate — agent runtime & orchestration [integration]', () => {
       conn.db.execute(sql`update agent_versions set system_instruction = 'tampered' where id = ${v1.id}`),
     ).rejects.toThrow();
 
+    // B7: skills are seeded with the library, versioned and immutable.
+    expect((await listSkills(conn.db, owner)).map((k) => `${k.skillKey}@${k.versionNo}`)).toEqual(['adr-writing@1', 'secure-coding@1']);
+    const [adr] = await listSkills(conn.db, owner);
+    expect((await publishSkill(conn.db, owner, { skillKey: 'adr-writing', name: adr!.name, description: adr!.description, instructions: adr!.instructions })).created).toBe(false);
+    const changedSkill = await publishSkill(conn.db, owner, { skillKey: 'scratch', name: 'Scratch', instructions: 'v1' });
+    expect((await publishSkill(conn.db, owner, { skillKey: 'scratch', name: 'Scratch', instructions: 'v2' })).skill.versionNo).toBe(changedSkill.skill.versionNo + 1);
+    await expect(conn.db.execute(sql`update agent_skills set instructions = 'tampered' where id = ${changedSkill.skill.id}`)).rejects.toThrow();
+    await expect(
+      createAgent(conn.db, owner, { agentKey: 'badskill', name: 'Bad', role: 'qa', definition: { systemInstruction: 'x', skills: ['Not A Key'] } }),
+    ).rejects.toThrow(/Invalid skill key/);
+
     await expect(
       createAgent(conn.db, owner, { agentKey: 'rogue', name: 'Rogue', role: 'wizard', definition: { systemInstruction: 'x' } }),
     ).rejects.toThrow(/Unknown agent role/);
@@ -402,14 +415,18 @@ describe('Phase 5 gate — agent runtime & orchestration [integration]', () => {
     expect(untrusted.role).toBe('user');
     expect(untrusted.content).toContain('US-1 Users can log in.');
     expect(system).not.toContain('US-1 Users can log in.');
+    // B7: the architect's skill is part of the trusted instructions, and its version is on record.
+    expect(system).toContain('## Skill: Architecture Decision Records');
+    expect(untrusted.content).not.toContain('## Skill:');
     expect(architectCall.body).not.toContain('Requirements analysed'); // the BA's chat summary is not forwarded
     const [pkg] = await conn.db.select().from(contextPackages).where(eq(contextPackages.taskId, architecture.id));
+    expect(pkg!.promptVersion).toBe('architect@1+adr-writing@1');
     expect((pkg!.manifest as { items: Array<{ path: string; source: string }> }).items).toContainEqual(
       expect.objectContaining({ path: '.ai-context/01-requirements/overview.md', source: 'handoff' }),
     );
 
     // Only a human may decide; nothing can approve its own work.
-    const [approval] = await listApprovals(conn.db, owner, projectId, { status: 'pending' });
+    const [approval] = (await listApprovals(conn.db, owner, projectId, { status: 'pending' })).items;
     expect(approval).toMatchObject({ kind: 'workflow_gate', taskId: architecture.id });
     const agentActor: Actor = { type: 'agent', agentKey: 'architect', agentVersion: 1, workspaceId, taskId: architecture.id };
     await expect(decideApproval(conn.db, agentActor, approval!.id, { decision: 'approved' })).rejects.toThrow(/Only a human/);
@@ -427,7 +444,7 @@ describe('Phase 5 gate — agent runtime & orchestration [integration]', () => {
     expect(calls[0]!.body).toContain('Add a caching layer.');
     await expect(decideApproval(conn.db, owner, approval!.id, { decision: 'approved' })).rejects.toThrow(/already rejected/);
 
-    const [second] = await listApprovals(conn.db, owner, projectId, { status: 'pending' });
+    const [second] = (await listApprovals(conn.db, owner, projectId, { status: 'pending' })).items;
     await decideApproval(conn.db, owner, second!.id, { decision: 'approved', comment: 'Good.' });
     expect((await taskOfStage(run.id, 'architecture')).status).toBe('completed');
 
@@ -612,6 +629,20 @@ describe('Phase 5 gate — agent runtime & orchestration [integration]', () => {
     await transitionTask(conn.db, owner, task.id, 'ready', { reason: 'request approved' });
     expect((await drainWorker(sched, 'worker-1')).map((t) => t.outcome)).toEqual(['completed']);
     expect(calls[0]!.body).toContain('Build a login page.');
+  });
+
+  it('fails clearly, before any model call, when an agent needs a skill that does not exist', async () => {
+    await createAgent(conn.db, owner, {
+      agentKey: 'skilless',
+      name: 'Skilless',
+      role: 'qa',
+      definition: { systemInstruction: 'Test things.', skills: ['missing-skill'] },
+    });
+    await startRun({ stages: [stage('qa', 'skilless', { title: 'Needs a skill', maxRetries: 0 })] });
+    const [tick] = await drainWorker(sched, 'worker-1');
+    expect(tick).toMatchObject({ outcome: 'failed' });
+    expect(tick!.error).toMatch(/needs unknown skill\(s\): missing-skill/);
+    expect(calls).toEqual([]);
   });
 
   it('parks a task that needs human input instead of guessing', async () => {

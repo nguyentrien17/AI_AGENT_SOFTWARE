@@ -4,7 +4,7 @@
 > blueprint or codebase. Update this file every time a task is finished or a decision is made,
 > *before* doing anything else, so work can be picked up by another agent at any moment.
 
-Last updated: 2026-11-10 (Phases 0–5 done; 6A done; Phase 7/8 non-sandbox items done — next todo: Web UI, R16; see section 5)
+Last updated: 2026-11-10 (Part B backend done; Web UI (B1) in progress — see §4b and §5)
 
 ## 1. How to resume in 3 steps
 1. Read section 2 (current task checklist) and section 3 (design decisions for the active phase).
@@ -21,7 +21,7 @@ Reference only when needed:
 ## 2. Current state & next step
 
 **Phases 0–5 complete (gates passed). Phase 6 part A done; Phase 7/8 items that need no sandbox done (report `docs/reports/phase-7-8-partial.md`). Gates 6, 7, 8 stay open until a sandbox exists.** Reports: `docs/reports/phase-1.md` … `phase-5.md`.
-`npm run verify` = 29 test files / 271 tests green, typecheck + lint + dependency rules clean.
+`npm run verify` = 33 test files / 285 tests green, typecheck + lint + dependency rules clean.
 Phases 4–6A committed and pushed to `https://github.com/nguyentrien17/AI_AGENT_SOFTWARE` on 2026-11-10 (user request).
 
 ### Phase 6 — part A DONE (report `docs/reports/phase-6.md`); part B blocked. Next: ask the user — install a container runtime for part B, or start Phase 8 pieces / Web UI.
@@ -143,6 +143,26 @@ report `sandbox_unavailable`.
 - Mock provider `fetch` is allowed only in tests and must be labelled TEST-ONLY (Blueprint §20.3).
 - After each phase: write `docs/reports/phase-N.md` in the §20.6 format and update the ledger.
 
+## 4b. Active work — part B (user request 2026-11-10: "làm phần B")
+Order (backend first, the Web UI uses these): B3 worktree cleanup → B4 R16 provider-change approval →
+B2 CSRF Origin check, cursor pagination, OpenAPI response schemas → B5 outbox dispatcher + context-map
+→ B6 checkpoint restore → B7 agent skills → B1 Web UI. Design decisions:
+- B3: integration stage removes the worktrees of the task branches it merged (branches are kept).
+- B4: fallback halt `provider_change_requires_approval` opens approval kind `provider_change`
+  (subject: from/to provider + model) when the task exists; `decideApproval` reschedules the task like
+  `tool_call`; the router treats providers with an approved request for that task as allowed.
+- B2 CSRF: state-changing requests carrying an `Origin`/`Referer` must match `ALLOWED_ORIGINS`
+  (default: the API's own host/port on localhost/127.0.0.1); requests without either (curl, PowerShell)
+  are allowed — browsers always send `Origin` on cross-site writes.
+- B2 pagination: `?limit=&cursor=` on task, artifact, workflow-run and approval lists; response keeps
+  `items` and adds `nextCursor` (UUIDv7 ids are time ordered).
+- B5: `dispatchOutboxBatch` in `observability` claims `pending` events, runs handlers, marks `dispatched`
+  or retries then `failed`; the worker runs it; handler for artifact events re-syncs `context-map.json`.
+- B6: restore never deletes history: each artifact gets a new version with the checkpoint content, items
+  created later are reported, and a git branch `restore/<checkpointId>` is created at the checkpoint commit.
+- B7: `agent_skills` (versioned, immutable) seeded from `agent-library/skills/*.yaml`; an agent version
+  lists `skills`; the runtime appends the skills' instructions to the trusted system instruction.
+
 ## 5. Pending register — everything not done yet (keep this table current)
 Status: **doing** = in progress this session · **todo** = can be done now · **blocked** = cannot be done, reason given.
 
@@ -155,17 +175,27 @@ Status: **doing** = in progress this session · **todo** = can be done now · **
 | P8-06 Lineage API (Blueprint §17 audit questions) | 8 | **done** | `orchestration/src/lineage.ts`, `GET /tasks/{id}/lineage` (needs `audit.read`); test in `apps/api/test/tools.e2e.test.ts` |
 | P7-07 Default SDLC workflow + Developer agent definition | 7 | **done** | `agent-library/developer.yaml`, `agent-library/workflows/sdlc-default.yaml`, `seedWorkflowLibrary`, `POST /workflows/seed` |
 | P8-07 Concurrency tests (parallel claims, lease races) | 8 | **done** | `orchestration/test/library-concurrency.test.ts` |
-| Web UI: P1-14 shell, P2-10 Context Explorer, P3-11 AI Mgmt, P4-10 Usage & Costs, P5-12 dashboards, P8-05 approval UI | 1–8 | todo | Stack approved (D1, 2026-11-10: React + Vite). Needs `npm install` of UI deps (network) |
-| R16 Approval request for provider change | 4 | todo | After P8-05 approvals |
+| Web UI (B1, in progress): P1-14 shell, P2-10 Context Explorer, P3-11 AI Mgmt, P4-10 Usage & Costs, P5-12 dashboards, P8-05 approval UI | 1–8 | todo | Stack approved (D1, 2026-11-10: React + Vite). Needs `npm install` of UI deps (network) |
+| R16 Approval request for provider change | 4 | **done** | router opens approval kind `provider_change` on fallback halt; approved providers allowed for that task; test in `orchestration/test/quality.test.ts` |
 | Phase 6 part B: Docker `SandboxAdapter`, limits, runtime images, terminal/test tools, log streaming, container escape tests | 6 | blocked | No Docker/Podman/WSL on host. Needs a container runtime or a remote Linux host |
 | P8-03 Dependency vulnerability scan | 8 | blocked | Must process untrusted project manifests → run inside the sandbox |
 | P8-04 Migration up/down validation | 8 | blocked | Runs generated migrations → sandbox |
 | QA agent + build/test gates, P7-09 test-failure repair loop | 7 | blocked | Needs sandbox to run tests |
 | P7-10 Sample app end-to-end from a prompt (Phase 7 gate), MVP pillar 6 | 7 | blocked | Needs sandbox + a real model API key |
 | R14 Live provider verification | 3 | blocked | Needs a real API key or local Ollama from the user |
+| R5 CSRF Origin/Referer check | 1 | **done** | `apps/api/src/csrf.ts`, env `ALLOWED_ORIGINS`; test `apps/api/test/csrf.test.ts` |
+| R2 Cursor pagination (tasks, artifacts, runs, approvals) | 1 | **done** | `toPage` in `shared`; `{ items, nextCursor }`; test `apps/api/test/pagination.e2e.test.ts` |
+| R3 Response schemas in OpenAPI | 1 | **done** | `apps/api/src/response-schemas.ts`: problem details on every route + success schemas for the UI routes (additionalProperties kept) |
+| R4 Outbox dispatcher | 1 | **done** | `observability/src/outbox.ts` (lease claim → handle outside tx → settle; migration 0012); run by the worker |
+| R6 Regenerate `context-map.json` from the outbox consumer | 2 | **done** | `apps/api/src/outbox-handlers.ts` |
+| R9 Checkpoint restore | 2/5 | **done** | `context/src/checkpoints.ts restoreCheckpoint` (new versions by content hash, report additions, branch `restore/<id>`), `POST /checkpoints/{id}/restore` |
+| R28 Remove task worktrees after integration | 6 | **done** | `scheduler.ts runIntegrationClaim` (branches kept) |
+| R21 Agent skills (Blueprint §6.3) | 5 | **done** | `agent-runtime/src/skills.ts`, `agent-library/skills/*.yaml`, `GET /skills`; prompt version records skill versions |
+| R18 Dedicated `budget.*` permissions (budgets reuse `ai.config.*`) | 4 | needs decision | Changing RBAC needs explicit human approval (Blueprint §20.7) |
 | R19 tokenizer-based token estimate, R20 actual cost from billing APIs, R23 separate worker process, R24 SSE via LISTEN/NOTIFY, R25 prompt caching | — | todo (post-MVP) | Not needed for MVP gates |
 
 ## 6. Session log (newest first)
+- 2026-11-10 — Part B backend done: worktree cleanup, provider-change approvals (R16), CSRF origin check, pagination, OpenAPI response schemas, outbox dispatcher (lease-based) + context-map resync, checkpoint restore, agent skills. Next: Web UI (B1).
 - 2026-11-10 — README rewritten as a step-by-step guide and verified against a live API. Fixes found while verifying: `.env` was never loaded; relative paths resolved from `apps/api`; user request had no path to the BA (now `request.md` input); missing/unapproved inputs burned retries (now `waiting_for_input`).
 - 2026-11-10 — Phase 7/8 without sandbox: secret scanner + gate engine, integration stage, tool-call approvals, lineage API, developer agent + default SDLC workflow, concurrency tests. 268 tests green. Pending register added (§5).
 - 2026-11-10 — Phase 6 part A finished: tool-executor, runtime tool loop, tool API; 250 tests green. Pushed to GitHub on user request.

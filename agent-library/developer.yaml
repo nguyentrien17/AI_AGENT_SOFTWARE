@@ -17,6 +17,7 @@ allowed_tools:
   - git_log
   - git_commit
   - git_check_merge
+skills: [secure-coding]
 allowed_actions: [read_file, write_file, delete_file, git_read, git_commit]
 allowed_file_scopes: ['source-code/**', 'tests/**']
 completion_criteria:

@@ -7,6 +7,7 @@ import {
   getAgent,
   listAgents,
   listAgentVersions,
+  listSkills,
   publishAgentVersion,
   seedAgentLibrary,
   setAgentStatus,
@@ -85,6 +86,8 @@ export function workflowRoutes(app: FastifyInstance, deps: AppDeps) {
   );
 
   r.post('/agents/seed', async (req) => ({ items: await seedAgentLibrary(db, actorOf(req), libraryDir) }));
+
+  r.get('/skills', async (req) => ({ items: await listSkills(db, actorOf(req)) }));
 
   r.get('/agents/:id', { schema: { params: IdParams } }, async (req) => getAgent(db, actorOf(req), req.params.id));
 
@@ -166,7 +169,7 @@ export function workflowRoutes(app: FastifyInstance, deps: AppDeps) {
   );
 
   r.get('/projects/:id/workflow-runs', { schema: { params: IdParams } }, async (req) => ({
-    items: await listWorkflowRuns(db, actorOf(req), req.params.id),
+    ...(await listWorkflowRuns(db, actorOf(req), req.params.id, req.query as never)),
   }));
 
   r.get('/workflow-runs/:id', { schema: { params: IdParams } }, async (req) =>
@@ -197,10 +200,12 @@ export function workflowRoutes(app: FastifyInstance, deps: AppDeps) {
         params: IdParams,
         querystring: Type.Object({
           status: Type.Optional(literals(['pending', 'approved', 'rejected', 'cancelled'] as const)),
+          cursor: Type.Optional(Uuid),
+          limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
         }),
       },
     },
-    async (req) => ({ items: await listApprovals(db, actorOf(req), req.params.id, req.query) }),
+    async (req) => listApprovals(db, actorOf(req), req.params.id, req.query),
   );
 
   r.post(

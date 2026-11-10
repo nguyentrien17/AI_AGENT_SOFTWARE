@@ -46,6 +46,8 @@ export interface SelectionConfig {
   requireApprovalForProviderChange: boolean;
   /** Tightest per-invocation cost ceiling from configuration limits and per-invocation budgets. */
   maxCostUsd: number | null;
+  /** Providers a human approved switching to for this task (R16); exempt from the provider-change rule. */
+  approvedProviderIds?: string[];
 }
 
 export interface SelectionLimits {
@@ -159,7 +161,8 @@ export function hardFilterRejections(c: RoutingCandidate, ctx: FilterContext): s
   if (
     (config.requireApprovalForProviderChange || ceilings.requireApprovalForProviderChange) &&
     ctx.primaryProviderId !== null &&
-    c.providerId !== ctx.primaryProviderId
+    c.providerId !== ctx.primaryProviderId &&
+    !(config.approvedProviderIds ?? []).includes(c.providerId)
   ) {
     out.push('provider_change_requires_approval');
   }

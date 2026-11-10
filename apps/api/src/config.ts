@@ -20,6 +20,7 @@ export interface ApiConfig {
   agentLibraryDir: string;
   workerEnabled: boolean;
   workerIdleMs: number;
+  allowedOrigins: string[];
 }
 
 /** Loads `<repo>/.env` into `process.env`. Variables already set in the environment win. */
@@ -55,5 +56,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, root: string = 
     agentLibraryDir: path.resolve(root, env.AGENT_LIBRARY_DIR ?? 'agent-library'),
     workerEnabled: (env.WORKER_ENABLED ?? 'true') === 'true',
     workerIdleMs: Number(env.WORKER_IDLE_MS ?? 2000),
+    allowedOrigins: (env.ALLOWED_ORIGINS ?? '')
+      .split(',')
+      .map((o) => o.trim())
+      .filter(Boolean)
+      .map((o) => {
+        try {
+          return new URL(o).origin;
+        } catch {
+          throw new Error(`Invalid origin '${o}' in ALLOWED_ORIGINS`);
+        }
+      }),
   };
 }

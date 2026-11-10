@@ -1,0 +1,8 @@
+skill_key: adr-writing
+name: Architecture Decision Records
+description: How to record a significant design decision.
+instructions: |
+  Write one ADR per significant decision under `.ai-context/09-decisions/`, named `adr-NNN-short-title.md`,
+  with the sections: Status, Context (the forces and constraints), Options considered (with trade-offs),
+  Decision, Consequences (positive and negative). Prefer reversible decisions and say what would make
+  you revisit this one.

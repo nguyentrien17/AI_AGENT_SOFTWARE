@@ -16,6 +16,7 @@ import {
   listCheckpoints,
   listHandoffs,
   listProjectMemories,
+  restoreCheckpoint,
   verifyCheckpoint,
 } from '@platform/context';
 import { NotFoundError, ValidationError } from '@platform/shared';
@@ -149,5 +150,9 @@ export function contextRoutes(app: FastifyInstance, deps: AppDeps) {
   );
   r.get('/checkpoints/:id', { schema: { params: IdParams } }, async (req) =>
     verifyCheckpoint(adeps, actorOf(req), req.params.id),
+  );
+
+  r.post('/checkpoints/:id/restore', { schema: { params: IdParams } }, async (req) =>
+    restoreCheckpoint(adeps, actorOf(req), req.params.id),
   );
 }

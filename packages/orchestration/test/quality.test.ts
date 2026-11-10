@@ -16,6 +16,7 @@ import {
 import {
   approvals,
   createTestDatabase,
+  fallbackEvents,
   type DatabaseConnection,
   projects,
   qualityGateEvaluations,
@@ -36,6 +37,7 @@ import {
   resolveToolApproval,
   runGit,
   syncToolRegistry,
+  taskWorktreeDir,
   ToolCatalog,
 } from '@platform/tool-executor';
 import {
@@ -256,6 +258,12 @@ describe('Quality Gates & integration [integration]', () => {
     const integ = await taskOf(r.id, 'integrate');
     const [gate] = await gates(integ.id);
     expect(gate).toMatchObject({ gateKey: 'integration_merge', outcome: 'passed' });
+    // B3: merged task worktrees are removed; their branches stay.
+    for (const stageKey of ['a', 'b']) {
+      const t = await taskOf(r.id, stageKey);
+      await expect(fs.access(taskWorktreeDir(storage.root, proj!.workspaceId, proj!.key, t.id))).rejects.toThrow();
+      expect((await runGit(wt, ['branch', '--list', `task/${t.id}`])).stdout).toContain(`task/${t.id}`);
+    }
     expect(gate!.evidence.gitTreeHash).toMatch(/^[0-9a-f]{40}$/);
   });
 
@@ -391,5 +399,96 @@ describe('P8-05: human approval for high-risk tool calls [integration]', () => {
     });
     expect(again).toMatchObject({ state: 'pending', created: true });
     expect(again.approvalId).not.toBe(request!.id);
+  });
+});
+
+describe('R16: human approval for a provider change during fallback [integration]', () => {
+  it('parks the task, and after approval the fallback may cross to the other provider', async () => {
+    /** TEST-ONLY: provider A is down (503), provider B answers with a finished envelope. */
+    const providerCalls: string[] = [];
+    const splitFetch: typeof fetch = async (input) => {
+      const url = String(input);
+      providerCalls.push(url.includes('down.local') ? 'A' : 'B');
+      if (url.includes('down.local')) return new Response('{"error":"overloaded"}', { status: 503 });
+      const envelope = {
+        status: 'completed',
+        summary: 'notes written',
+        artifacts: [],
+        handoff: { decisions: [], assumptions: [], open_questions: [], required_actions: [] },
+        result: {},
+      };
+      return new Response(
+        JSON.stringify({ choices: [{ message: { role: 'assistant', content: JSON.stringify(envelope) } }], usage: { prompt_tokens: 5, completion_tokens: 5 } }),
+        { status: 200 },
+      );
+    };
+    const mk = async (providerKey: string, baseUrl: string, modelKey: string) => {
+      const prov = await createProvider(conn.db, secretStore, owner, {
+        providerKey,
+        displayName: providerKey,
+        adapterType: 'openai_compatible',
+        baseUrl,
+        apiKey: 'sk-r16-test-key-0000',
+      });
+      return createModel(conn.db, owner, {
+        providerId: prov.id,
+        modelKey,
+        availability: 'available',
+        qualityTier: 'high',
+        capabilities: { structured_output: 'yes' },
+      });
+    };
+    const modelA = await mk('r16-a', 'https://down.local/v1', 'a-model');
+    const modelB = await mk('r16-b', 'https://up.local/v1', 'b-model');
+    await createAgent(conn.db, owner, {
+      agentKey: 'notetaker',
+      name: 'Notetaker',
+      role: 'documentation',
+      definition: { systemInstruction: 'Write notes.' },
+    });
+    await upsertAgentModelConfig(conn.db, owner, {
+      scope: 'agent',
+      agentKey: 'notetaker',
+      mode: 'fixed',
+      primaryModelId: modelA.id,
+      fallbackModelIds: [modelB.id],
+      routingPolicy: { requireApprovalForProviderChange: true },
+    });
+    const crossSched: SchedulerDeps = {
+      ...sched,
+      executor: createAgentTaskExecutor({
+        db: conn.db,
+        storage,
+        secretStore,
+        registry: new ProviderAdapterRegistry([new OpenAiCompatibleAdapter(splitFetch)]),
+        sleep: async () => undefined,
+      }),
+    };
+    const p = await newProject('crossing');
+    const r = await run(p.id, { stages: [{ key: 'notes', agentKey: 'notetaker', title: 'Cross provider', objective: 'Notes' }] });
+
+    expect((await drainWorker(crossSched, 'w')).map((t) => t.outcome)).toEqual(['waiting_for_input']);
+    const task = await taskOf(r.id, 'notes');
+    expect(task).toMatchObject({ status: 'waiting_for_input', retryCount: 0 });
+    expect(task.statusReason).toMatch(/provider_change_requires_approval .*approval .* requested/);
+    expect(providerCalls).toEqual(['A']); // provider B was never contacted without approval
+    const [request] = await conn.db.select().from(approvals).where(eq(approvals.taskId, task.id));
+    expect(request).toMatchObject({
+      kind: 'provider_change',
+      status: 'pending',
+      subject: { fromProviderKey: 'r16-a', toProviderKey: 'r16-b', toModelKey: 'b-model', cause: 'model_unavailable' },
+    });
+
+    await decideApproval(conn.db, owner, request!.id, { decision: 'approved', comment: 'B is fine for notes' });
+    expect((await taskOf(r.id, 'notes')).status).toBe('ready');
+
+    providerCalls.length = 0;
+    expect((await drainWorker(crossSched, 'w')).map((t) => t.outcome)).toEqual(['completed']);
+    expect(providerCalls).toEqual(['A', 'B']);
+    const events = await conn.db.select().from(fallbackEvents).where(eq(fallbackEvents.taskId, task.id)).orderBy(fallbackEvents.createdAt);
+    expect(events.map((e) => [e.allowed, e.haltReason])).toEqual([
+      [false, 'provider_change_requires_approval'],
+      [true, null],
+    ]);
   });
 });

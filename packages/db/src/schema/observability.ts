@@ -42,6 +42,9 @@ export const systemEvents = pgTable(
     attempts: integer('attempts').notNull().default(0),
     lastError: text('last_error'),
     dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
+    /** Dispatcher lease: the worker handling the event and until when (crashed workers lose it). */
+    claimedBy: text('claimed_by'),
+    claimedUntil: timestamp('claimed_until', { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [

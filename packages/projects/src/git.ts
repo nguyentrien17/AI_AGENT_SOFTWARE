@@ -67,3 +67,20 @@ export async function gitCommitAll(dir: string, message: string): Promise<string
     return stdout.trim();
   });
 }
+
+/**
+ * Creates a branch pointing at an existing commit without touching any working tree (used to expose a
+ * checkpoint's code for review or recovery). Returns false when the branch already exists.
+ */
+export async function gitCreateBranchAt(dir: string, branch: string, commit: string): Promise<boolean> {
+  if (!(await isGitRepo(dir))) return false;
+  if (!/^[0-9a-f]{7,40}$/.test(commit)) throw new Error(`Invalid commit '${commit}'`);
+  if (!/^[A-Za-z0-9._/-]{1,100}$/.test(branch) || branch.startsWith('-')) throw new Error(`Invalid branch '${branch}'`);
+  return withRepoLock(dir, async () => {
+    const opts = { cwd: dir, env: env(), timeout: 30_000 };
+    const { stdout } = await run('git', ['branch', '--list', branch], opts);
+    if (stdout.trim()) return false;
+    await run('git', ['branch', branch, commit], opts);
+    return true;
+  });
+}

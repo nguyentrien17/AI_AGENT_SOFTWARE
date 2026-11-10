@@ -16,6 +16,7 @@ import { executeTool, type ToolExecutorDeps } from '@platform/tool-executor';
 import { eq } from 'drizzle-orm';
 import { type AgentOutputEnvelope, buildEnvelopeSchema, parseAgentOutput } from './output.js';
 import type { Agent, AgentVersion } from './registry.js';
+import { type AgentSkill, resolveSkills } from './skills.js';
 
 type TaskRow = typeof tasks.$inferSelect;
 type Complexity = TaskRow['complexity'];
@@ -129,9 +130,10 @@ function toolsFor(deps: AgentRuntimeDeps, version: AgentVersion, task: TaskRow):
  * Trusted instructions: the versioned agent definition plus the platform's output contract. Project
  * artifacts never enter this block (Blueprint §16.4).
  */
-export function assembleSystemInstruction(agent: Agent, version: AgentVersion): string {
+export function assembleSystemInstruction(agent: Agent, version: AgentVersion, skills: readonly AgentSkill[] = []): string {
   return [
     version.systemInstruction,
+    ...skills.flatMap((s) => ['', `## Skill: ${s.name}`, s.instructions]),
     '',
     '## Platform contract',
     `You act as the '${agent.role}' agent. Reply with a single JSON object and nothing else.`,
@@ -211,11 +213,17 @@ export async function executeAgentTask(deps: AgentRuntimeDeps, ctx: AgentTaskCon
   };
 
   try {
+    const { skills, missing } = await resolveSkills(db, project.workspaceId, version.skills);
+    if (missing.length) {
+      throw new AgentExecutionError('skill_unavailable', `Agent '${agent.agentKey}' needs unknown skill(s): ${missing.join(', ')}`, false);
+    }
+    // The prompt version records exactly which agent and skill versions shaped the instructions.
+    const promptVersion = [`${agent.agentKey}@${version.versionNo}`, ...skills.map((s) => `${s.skillKey}@${s.versionNo}`)].join('+');
     let built: Awaited<ReturnType<typeof buildContextPackage>>;
     try {
       built = await buildContextPackage(adeps, actor, {
         taskId: task.id,
-        promptVersion: `${agent.agentKey}@${version.versionNo}`,
+        promptVersion,
       });
     } catch (err) {
       if (isMissingRequiredInput(err)) throw new ContextInputUnavailableError((err as Error).message, (err as AppError).code);
@@ -234,7 +242,7 @@ export async function executeAgentTask(deps: AgentRuntimeDeps, ctx: AgentTaskCon
       projectId: task.projectId,
       taskId: task.id,
       ...(ctx.workflowRunId ? { workflowId: ctx.workflowRunId } : {}),
-      systemInstruction: assembleSystemInstruction(agent, version),
+      systemInstruction: assembleSystemInstruction(agent, version, skills),
       ...(untrustedContext ? { untrustedContext } : {}),
       ...(offeredTools.length ? { tools: offeredTools } : {}),
       jsonSchema: { name: 'agent_output', schema: buildEnvelopeSchema(version.outputSchema) },

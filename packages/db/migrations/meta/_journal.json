@@ -85,6 +85,27 @@
       "when": 1794297060530,
       "tag": "0011_tool_executor_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794303348921,
+      "tag": "0012_outbox_claims",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794304280716,
+      "tag": "0013_agent_skills",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794304283806,
+      "tag": "0014_agent_skills_guards",
+      "breakpoints": true
     }
   ]
 }

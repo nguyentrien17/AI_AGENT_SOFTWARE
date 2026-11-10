@@ -56,6 +56,8 @@ export const agentVersions = pgTable(
     timeoutSeconds: integer('timeout_seconds').notNull().default(600),
     retryPolicy: jsonb('retry_policy').$type<AgentRetryPolicy>().notNull().default({}),
     completionCriteria: jsonb('completion_criteria').$type<string[]>().notNull().default([]),
+    /** Skill keys whose latest version is added to the agent's instructions at run time. */
+    skills: text('skills').array().notNull().default([]),
     contentHash: text('content_hash').notNull(),
     createdBy: text('created_by').notNull(),
     createdAt: createdAt(),
@@ -89,4 +91,27 @@ export const agentExecutions = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index('agent_executions_task_idx').on(t.taskId, t.createdAt)],
+);
+
+/**
+ * Reusable agent skills (Blueprint §6.3: narrow capabilities as skills rather than heavy agents).
+ * Immutable per version, like agent definitions.
+ */
+export const agentSkills = pgTable(
+  'agent_skills',
+  {
+    id: id(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    skillKey: text('skill_key').notNull(),
+    versionNo: integer('version_no').notNull(),
+    name: text('name').notNull(),
+    description: text('description').notNull().default(''),
+    instructions: text('instructions').notNull(),
+    contentHash: text('content_hash').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('agent_skills_ws_key_version_uq').on(t.workspaceId, t.skillKey, t.versionNo)],
 );

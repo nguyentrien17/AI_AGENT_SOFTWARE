@@ -1,8 +1,21 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, lt } from 'drizzle-orm';
 import { approvals, type Db, projects, tasks } from '@platform/db';
 import { authorize } from '@platform/iam';
 import { audit, emitEvent } from '@platform/observability';
-import { type Actor, actorId, ConflictError, ForbiddenError, NotFoundError, ValidationError } from '@platform/shared';
+import {
+  type Actor,
+  actorId,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+  clampLimit,
+  type Page,
+  type PageRequest,
+  toPage,
+  isUuid,
+} from '@platform/shared';
+import { PROVIDER_CHANGE_APPROVAL } from '@platform/model-router';
 import { TOOL_CALL_APPROVAL } from '@platform/tool-executor';
 import { recordGateEvaluation, transitionTask } from './tasks.js';
 import { syncWorkflowStep } from './workflows.js';
@@ -82,14 +95,24 @@ export async function listApprovals(
   db: Db,
   actor: Actor,
   projectId: string,
-  filter: { status?: Approval['status'] } = {},
-): Promise<Approval[]> {
+  filter: { status?: Approval['status'] } & PageRequest = {},
+): Promise<Page<Approval>> {
   await authorize(db, actor, 'task.read', { projectId });
-  return db
+  if (filter.cursor && !isUuid(filter.cursor)) throw new ValidationError('Invalid cursor');
+  const limit = clampLimit(filter.limit, 50, 200);
+  const rows = await db
     .select()
     .from(approvals)
-    .where(and(eq(approvals.projectId, projectId), filter.status ? eq(approvals.status, filter.status) : undefined))
-    .orderBy(desc(approvals.createdAt), desc(approvals.id));
+    .where(
+      and(
+        eq(approvals.projectId, projectId),
+        filter.status ? eq(approvals.status, filter.status) : undefined,
+        filter.cursor ? lt(approvals.id, filter.cursor) : undefined,
+      ),
+    )
+    .orderBy(desc(approvals.id))
+    .limit(limit + 1);
+  return toPage(rows, limit, (a) => a.id);
 }
 
 /** The most recent rejection comment for a task, fed back to the agent on its next attempt. */
@@ -151,7 +174,7 @@ export async function decideApproval(
     return row;
   });
 
-  if (decided.kind === TOOL_CALL_APPROVAL && decided.taskId) {
+  if ((decided.kind === TOOL_CALL_APPROVAL || decided.kind === PROVIDER_CHANGE_APPROVAL) && decided.taskId) {
     // Either way the agent gets another turn: with the approval it can run the call once; after a
     // rejection the comment is its feedback (latestRejectionComment).
     const [parked] = await db.select().from(tasks).where(eq(tasks.id, decided.taskId)).limit(1);

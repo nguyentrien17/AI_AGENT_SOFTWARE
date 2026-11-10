@@ -56,7 +56,13 @@ export interface FallbackOption {
 export type FallbackStep =
   | { action: 'retry'; modelId: string }
   | { action: 'switch'; modelId: string; skipped: Array<{ modelId: string; rejections: string[] }> }
-  | { action: 'halt'; reason: FallbackHaltReason; skipped: Array<{ modelId: string; rejections: string[] }> };
+  | {
+      action: 'halt';
+      reason: FallbackHaltReason;
+      skipped: Array<{ modelId: string; rejections: string[] }>;
+      /** The fallback model that caused the halt, when one did. */
+      blockedModelId?: string;
+    };
 
 export interface FallbackState {
   currentModelId: string;
@@ -93,7 +99,7 @@ export function nextFallbackStep(failure: FailureClass, state: FallbackState): F
       return { action: 'halt', reason: 'fallback_below_min_quality_tier', skipped };
     }
     if (r.includes('provider_change_requires_approval')) {
-      return { action: 'halt', reason: 'provider_change_requires_approval', skipped };
+      return { action: 'halt', reason: 'provider_change_requires_approval', skipped, blockedModelId: option.modelId };
     }
     if (r.includes('insufficient_cost_budget') || r.includes('insufficient_token_budget')) {
       return { action: 'halt', reason: 'budget_exhausted', skipped };

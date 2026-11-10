@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNull, sql } from 'drizzle-orm';
 import {
   contextItems,
   contextPackages,
@@ -17,6 +17,10 @@ import {
   sha256Hex,
   ValidationError,
   VersionConflictError,
+  clampLimit,
+  type Page,
+  type PageRequest,
+  toPage,
 } from '@platform/shared';
 import { IntegrityError, type StorageAdapter } from '@platform/storage';
 import { authorize } from '@platform/iam';
@@ -385,13 +389,25 @@ export async function approveArtifactVersion(
   return approved;
 }
 
-export async function listArtifacts(deps: Pick<ArtifactDeps, 'db'>, actor: Actor, projectId: string) {
+/** Artifacts of a project ordered by path; the cursor is the last path of the previous page. */
+export async function listArtifacts(
+  deps: Pick<ArtifactDeps, 'db'>,
+  actor: Actor,
+  projectId: string,
+  opts: PageRequest = {},
+): Promise<Page<ArtifactItem>> {
   await authorize(deps.db, actor, 'artifact.read', { projectId });
-  return deps.db
+  if (opts.cursor !== undefined && (opts.cursor.length === 0 || opts.cursor.length > 500)) {
+    throw new ValidationError('Invalid cursor');
+  }
+  const limit = clampLimit(opts.limit, 100, 200);
+  const rows = await deps.db
     .select()
     .from(contextItems)
-    .where(eq(contextItems.projectId, projectId))
-    .orderBy(asc(contextItems.path));
+    .where(and(eq(contextItems.projectId, projectId), opts.cursor ? gt(contextItems.path, opts.cursor) : undefined))
+    .orderBy(asc(contextItems.path))
+    .limit(limit + 1);
+  return toPage(rows, limit, (i) => i.path);
 }
 
 export async function getArtifact(deps: Pick<ArtifactDeps, 'db'>, actor: Actor, itemId: string) {

@@ -13,6 +13,7 @@ import {
   ValidationError,
 } from '@platform/shared';
 import { jsonSchemaError } from './output.js';
+import { SKILL_KEY_RE } from './skills.js';
 
 export type Agent = typeof agents.$inferSelect;
 export type AgentVersion = typeof agentVersions.$inferSelect;
@@ -30,6 +31,8 @@ export interface AgentDefinition {
   timeoutSeconds?: number;
   retryPolicy?: AgentRetryPolicy;
   completionCriteria?: string[];
+  /** Keys of reusable skills whose latest version is added to the instructions at run time. */
+  skills?: string[];
 }
 
 export interface AgentView extends Agent {
@@ -62,6 +65,8 @@ interface NormalizedDefinition {
   timeoutSeconds: number;
   retryPolicy: AgentRetryPolicy;
   completionCriteria: string[];
+  /** Present only when non-empty, so definitions without skills keep their content hash. */
+  skills?: string[];
 }
 
 function cleanList(values: string[] | undefined, field: string): string[] {
@@ -91,6 +96,8 @@ export function normalizeDefinition(def: AgentDefinition): NormalizedDefinition 
   if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 86_400) {
     throw new ValidationError('timeoutSeconds must be 1..86400');
   }
+  const skills = [...new Set((def.skills ?? []).map((k) => k.trim()))];
+  for (const k of skills) if (!SKILL_KEY_RE.test(k)) throw new ValidationError(`Invalid skill key '${k}'`);
   const repairs = def.retryPolicy?.maxOutputRepairs ?? 1;
   if (!Number.isInteger(repairs) || repairs < 0 || repairs > MAX_OUTPUT_REPAIRS) {
     throw new ValidationError(`retryPolicy.maxOutputRepairs must be 0..${MAX_OUTPUT_REPAIRS} (bounded self-correction)`);
@@ -106,6 +113,7 @@ export function normalizeDefinition(def: AgentDefinition): NormalizedDefinition 
     timeoutSeconds,
     retryPolicy: { maxOutputRepairs: repairs },
     completionCriteria: (def.completionCriteria ?? []).map((c) => c.trim()).filter(Boolean),
+    ...(skills.length ? { skills } : {}),
   };
 }
 

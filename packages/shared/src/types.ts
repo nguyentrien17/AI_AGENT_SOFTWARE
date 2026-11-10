@@ -26,6 +26,17 @@ export interface Page<T> {
   nextCursor: string | null;
 }
 
+export interface PageRequest {
+  cursor?: string;
+  limit?: number;
+}
+
+/** Builds a page from `limit + 1` fetched rows: the extra row only signals that more exist. */
+export function toPage<T>(rows: T[], limit: number, cursorOf: (row: T) => string): Page<T> {
+  const items = rows.slice(0, limit);
+  return { items, nextCursor: rows.length > limit ? cursorOf(items[items.length - 1]!) : null };
+}
+
 export function clampLimit(limit: number | undefined, def = 50, max = 100): number {
   if (!limit || Number.isNaN(limit) || limit < 1) return def;
   return Math.min(Math.floor(limit), max);

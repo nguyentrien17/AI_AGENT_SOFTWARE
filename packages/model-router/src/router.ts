@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, lte } from 'drizzle-orm';
+import { and, desc, eq, inArray, lte, sql } from 'drizzle-orm';
 import {
   type AgentModelConfigView,
   type CapabilitySupport,
@@ -28,14 +28,17 @@ import {
   aiModelPricing,
   aiModels,
   aiProviders,
+  approvals,
   costRecords,
   type Db,
   fallbackEvents,
   modelInvocations,
+  projects,
+  tasks,
   tokenUsage,
 } from '@platform/db';
 import { authorize } from '@platform/iam';
-import { audit } from '@platform/observability';
+import { audit, emitEvent } from '@platform/observability';
 import { type Actor, actorId, AppError, UnprocessableError } from '@platform/shared';
 import { classifyFailure, type FallbackOption, nextFallbackStep } from './fallback.js';
 import { getRoutingPolicy, type RiskLevel, type RoutingPolicy } from './policy.js';
@@ -247,6 +250,7 @@ export async function resolveRoute(db: Db, workspaceId: string, query: RouteQuer
       allowAutoUpgrade: config.routingPolicy.allowAutoUpgrade ?? false,
       allowAutoDowngrade: config.routingPolicy.allowAutoDowngrade ?? false,
       requireApprovalForProviderChange: config.routingPolicy.requireApprovalForProviderChange ?? false,
+      approvedProviderIds: query.taskId ? await approvedProviderChanges(db, query.taskId) : [],
       maxCostUsd: minDefined(
         config.limits.maxCostPerTask !== undefined ? Number(config.limits.maxCostPerTask) : null,
         invocationBudget?.costLimitUsd != null ? Number(invocationBudget.costLimitUsd) : null,
@@ -594,10 +598,24 @@ export async function routeAndInvoke(
       });
 
       if (step.action === 'halt') {
+        let approvalId: string | null = null;
+        if (step.reason === 'provider_change_requires_approval' && step.blockedModelId && input.taskId) {
+          const target = plan.candidates.get(step.blockedModelId);
+          if (target) {
+            approvalId = await requestProviderChangeApproval(db, actor, {
+              taskId: input.taskId,
+              agentKey,
+              from: { providerId: current.providerId, providerKey: current.providerKey, modelKey: current.modelKey },
+              to: { providerId: target.providerId, providerKey: target.providerKey, modelId: target.modelId, modelKey: target.modelKey },
+              cause: trigger,
+            });
+          }
+        }
         throw new InvocationHaltedError(
           step.reason,
-          `Invocation for agent '${agentKey}' halted after ${attempts} attempt(s): ${step.reason} (${err.message})`,
-          { providerErrorKind: errorKind, attempts, trail },
+          `Invocation for agent '${agentKey}' halted after ${attempts} attempt(s): ${step.reason} (${err.message})` +
+            (approvalId ? ` — approval ${approvalId} requested` : ''),
+          { providerErrorKind: errorKind, attempts, trail, ...(approvalId ? { approvalId } : {}) },
         );
       }
       current = next!;
@@ -686,6 +704,93 @@ export async function routeAndInvoke(
       },
     };
   }
+}
+
+export const PROVIDER_CHANGE_APPROVAL = 'provider_change';
+
+/** Providers a human approved switching to for this task. */
+async function approvedProviderChanges(db: Db, taskId: string): Promise<string[]> {
+  const rows = await db
+    .select({ subject: approvals.subject })
+    .from(approvals)
+    .where(and(eq(approvals.taskId, taskId), eq(approvals.kind, PROVIDER_CHANGE_APPROVAL), eq(approvals.status, 'approved')));
+  return [...new Set(rows.map((r) => String(r.subject['toProviderId'])))];
+}
+
+/**
+ * Opens (or reuses) a human approval for crossing a provider trust boundary during fallback (Blueprint §5.3,
+ * R16). Only for real tasks: an approval always belongs to a project task.
+ */
+async function requestProviderChangeApproval(
+  db: Db,
+  actor: Actor,
+  input: {
+    taskId: string;
+    agentKey: string;
+    from: { providerId: string; providerKey: string; modelKey: string };
+    to: { providerId: string; providerKey: string; modelId: string; modelKey: string };
+    cause: string;
+  },
+): Promise<string | null> {
+  const [task] = await db
+    .select({ projectId: tasks.projectId, workspaceId: projects.workspaceId })
+    .from(tasks)
+    .innerJoin(projects, eq(projects.id, tasks.projectId))
+    .where(eq(tasks.id, input.taskId))
+    .limit(1);
+  if (!task) return null;
+  const [open] = await db
+    .select({ id: approvals.id })
+    .from(approvals)
+    .where(
+      and(
+        eq(approvals.taskId, input.taskId),
+        eq(approvals.kind, PROVIDER_CHANGE_APPROVAL),
+        eq(approvals.status, 'pending'),
+        sql`${approvals.subject}->>'toProviderId' = ${input.to.providerId}`,
+      ),
+    )
+    .limit(1);
+  if (open) return open.id;
+  const [row] = await db
+    .insert(approvals)
+    .values({
+      workspaceId: task.workspaceId,
+      projectId: task.projectId,
+      kind: PROVIDER_CHANGE_APPROVAL,
+      taskId: input.taskId,
+      title: `Allow agent '${input.agentKey}' to switch from ${input.from.providerKey} to ${input.to.providerKey}`,
+      subject: {
+        agentKey: input.agentKey,
+        fromProviderId: input.from.providerId,
+        fromProviderKey: input.from.providerKey,
+        fromModelKey: input.from.modelKey,
+        toProviderId: input.to.providerId,
+        toProviderKey: input.to.providerKey,
+        toModelId: input.to.modelId,
+        toModelKey: input.to.modelKey,
+        cause: input.cause,
+      },
+      requestedByType: actor.type,
+      requestedById: actorId(actor),
+    })
+    .returning();
+  await audit(db, actor, {
+    action: 'approval.requested',
+    targetType: 'approval',
+    targetId: row!.id,
+    projectId: task.projectId,
+    payload: { kind: PROVIDER_CHANGE_APPROVAL, from: input.from.providerKey, to: input.to.providerKey, taskId: input.taskId },
+  });
+  await emitEvent(db, {
+    type: 'approval.requested',
+    aggregateType: 'approval',
+    aggregateId: row!.id,
+    workspaceId: task.workspaceId,
+    projectId: task.projectId,
+    payload: { kind: PROVIDER_CHANGE_APPROVAL, taskId: input.taskId },
+  });
+  return row!.id;
 }
 
 export async function listFallbackEvents(

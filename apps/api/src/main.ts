@@ -34,6 +34,7 @@ async function main() {
     rateLimitPerMinute: config.rateLimitPerMinute,
     agentLibraryDir: config.agentLibraryDir,
     toolCatalog,
+    allowedOrigins: config.allowedOrigins,
   });
   const worker = config.workerEnabled
     ? startWorker({ db: conn.db, storage, secretStore, registry: adapterRegistry, toolCatalog, logger, idleMs: config.workerIdleMs })

@@ -5,6 +5,7 @@ import { parse as parseYaml } from 'yaml';
 import { agents, type Db } from '@platform/db';
 import { type Actor, ValidationError } from '@platform/shared';
 import { type AgentDefinition, createAgent, publishAgentVersion } from './registry.js';
+import { seedSkillLibrary } from './skills.js';
 
 export interface AgentLibraryEntry {
   file: string;
@@ -37,6 +38,7 @@ export function parseAgentDocument(text: string, file: string): AgentLibraryEntr
   if (typeof d['model_config_ref'] === 'string') definition.modelConfigRef = d['model_config_ref'];
   if (d['timeout_seconds'] !== undefined) definition.timeoutSeconds = d['timeout_seconds'] as number;
   if (d['completion_criteria'] !== undefined) definition.completionCriteria = d['completion_criteria'] as string[];
+  if (d['skills'] !== undefined) definition.skills = d['skills'] as string[];
   const retry = d['retry_policy'] as Record<string, unknown> | undefined;
   if (retry?.['max_output_repairs'] !== undefined) {
     definition.retryPolicy = { maxOutputRepairs: retry['max_output_repairs'] as number };
@@ -77,6 +79,8 @@ export interface SeedResult {
  */
 export async function seedAgentLibrary(db: Db, actor: Actor, dir: string): Promise<SeedResult[]> {
   if (!actor.workspaceId) throw new ValidationError('A workspace context is required');
+  // Skills first: agent definitions refer to them.
+  await seedSkillLibrary(db, actor, dir);
   const results: SeedResult[] = [];
   for (const entry of await loadAgentLibrary(dir)) {
     const [existing] = await db

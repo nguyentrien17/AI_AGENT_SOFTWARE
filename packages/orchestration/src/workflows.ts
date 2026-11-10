@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt } from 'drizzle-orm';
 import { resolveAgent } from '@platform/agent-runtime';
 import {
   approvals,
@@ -21,6 +21,11 @@ import {
   NotFoundError,
   UnprocessableError,
   ValidationError,
+  clampLimit,
+  type Page,
+  type PageRequest,
+  toPage,
+  isUuid,
 } from '@platform/shared';
 import { type GateKey, validateGateKeys } from '@platform/quality-gates';
 import { topologicalOrder } from './task-state-machine.js';
@@ -486,13 +491,23 @@ export async function getWorkflowRun(db: Db, actor: Actor, runId: string) {
   return { run, steps };
 }
 
-export async function listWorkflowRuns(db: Db, actor: Actor, projectId: string): Promise<WorkflowRun[]> {
+/** Runs of a project, newest first. */
+export async function listWorkflowRuns(
+  db: Db,
+  actor: Actor,
+  projectId: string,
+  opts: PageRequest = {},
+): Promise<Page<WorkflowRun>> {
   await authorize(db, actor, 'task.read', { projectId });
-  return db
+  if (opts.cursor && !isUuid(opts.cursor)) throw new ValidationError('Invalid cursor');
+  const limit = clampLimit(opts.limit, 50, 200);
+  const rows = await db
     .select()
     .from(workflowRuns)
-    .where(eq(workflowRuns.projectId, projectId))
-    .orderBy(desc(workflowRuns.startedAt), desc(workflowRuns.id));
+    .where(and(eq(workflowRuns.projectId, projectId), opts.cursor ? lt(workflowRuns.id, opts.cursor) : undefined))
+    .orderBy(desc(workflowRuns.id))
+    .limit(limit + 1);
+  return toPage(rows, limit, (r) => r.id);
 }
 
 async function setRunStatus(

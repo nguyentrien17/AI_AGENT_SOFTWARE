@@ -1,0 +1,9 @@
+skill_key: secure-coding
+name: Secure coding
+description: Baseline secure-coding rules for any code an agent writes.
+instructions: |
+  - Never write secrets, tokens, passwords or private keys into files; read them from the environment.
+  - Validate every external input (HTTP, files, environment) at the boundary and reject what is invalid.
+  - Use parameterized queries; never build SQL, shell commands or HTML by string concatenation.
+  - Use the language's standard library for cryptography; never invent algorithms.
+  - Log errors without sensitive data (credentials, personal data, full request bodies).

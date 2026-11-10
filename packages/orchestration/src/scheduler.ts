@@ -28,7 +28,12 @@ import { BudgetBlockedError, InvocationHaltedError, RoutingHaltError } from '@pl
 import { emitEvent } from '@platform/observability';
 import { DEFAULT_WORKSPACE_GATES, type GateKey, runQualityGates } from '@platform/quality-gates';
 import type { StorageAdapter } from '@platform/storage';
-import { integrateTaskBranches, integrationWorktreeDir } from '@platform/tool-executor';
+import {
+  integrateTaskBranches,
+  integrationWorktreeDir,
+  removeTaskWorktree,
+  taskWorktreeDir,
+} from '@platform/tool-executor';
 import { type Actor, AppError, isAppError, NotFoundError } from '@platform/shared';
 import { HUMAN_APPROVAL_GATE, latestRejectionComment, requestApproval } from './approvals.js';
 import { recordGateEvaluation, type Task, transitionTask } from './tasks.js';
@@ -714,8 +719,9 @@ async function runIntegrationClaim(deps: SchedulerDeps, claim: TaskClaim, now: D
   const taskIds = upstream.filter((u) => (u.stage as { kind?: string }).kind !== 'integration').map((u) => u.taskId);
   const baseBranch = repo?.defaultBranch ?? 'main';
   const integrationBranch = repo?.integrationBranch ?? 'integration';
+  const repoDir = path.join(deps.storage.root, project!.storagePath);
   const result = await integrateTaskBranches({
-    repoDir: path.join(deps.storage.root, project!.storagePath),
+    repoDir,
     worktreeDir: integrationWorktreeDir(deps.storage.root, project!.workspaceId, project!.key),
     baseBranch,
     integrationBranch,
@@ -749,6 +755,17 @@ async function runIntegrationClaim(deps: SchedulerDeps, claim: TaskClaim, now: D
     return 'blocked';
   }
   await recordGateEvaluation(db, system, task.id, { gateKey: INTEGRATION_GATE, outcome: 'passed', evidence });
+  // The merged work now lives on the integration branch: free the task worktrees (branches are kept).
+  const cleaned: string[] = [];
+  for (const m of result.merged) {
+    const mergedTaskId = m.branch.replace(/^task\//, '');
+    try {
+      await removeTaskWorktree(repoDir, taskWorktreeDir(deps.storage.root, project!.workspaceId, project!.key, mergedTaskId));
+      cleaned.push(mergedTaskId);
+    } catch {
+      // best effort: a locked or already removed worktree must not fail the integration
+    }
+  }
   await transitionTask(db, system, task.id, 'completed', { reason: evidence.summary });
   await syncWorkflowStep(db, task, 'completed', 'passed');
   await emitEvent(db, {
@@ -757,7 +774,7 @@ async function runIntegrationClaim(deps: SchedulerDeps, claim: TaskClaim, now: D
     aggregateId: task.id,
     workspaceId: claim.workspaceId,
     projectId: task.projectId,
-    payload: { integrationBranch, head: result.head, merged: result.merged.map((m) => m.branch) },
+    payload: { integrationBranch, head: result.head, merged: result.merged.map((m) => m.branch), worktreesRemoved: cleaned },
   });
   return 'completed';
 }

@@ -57,7 +57,7 @@ export function workRoutes(app: FastifyInstance, deps: AppDeps) {
 
   // ------------------------------------------------------------ artifacts
   r.get('/projects/:id/artifacts', { schema: { params: IdParams } }, async (req) => ({
-    items: await listArtifacts(adeps, actorOf(req), req.params.id),
+    ...(await listArtifacts(adeps, actorOf(req), req.params.id, req.query as never)),
   }));
 
   r.post(
@@ -140,8 +140,17 @@ export function workRoutes(app: FastifyInstance, deps: AppDeps) {
   // ------------------------------------------------------------ tasks
   r.get(
     '/projects/:id/tasks',
-    { schema: { params: IdParams, querystring: Type.Object({ status: Type.Optional(TaskStatusSchema) }) } },
-    async (req) => ({ items: await listTasks(db, actorOf(req), req.params.id, req.query as never) }),
+    {
+      schema: {
+        params: IdParams,
+        querystring: Type.Object({
+          status: Type.Optional(TaskStatusSchema),
+          cursor: Type.Optional(Type.String()),
+          limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
+        }),
+      },
+    },
+    async (req) => listTasks(db, actorOf(req), req.params.id, req.query as never),
   );
 
   r.post(

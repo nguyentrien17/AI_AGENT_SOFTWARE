@@ -17,4 +17,6 @@ export interface AppDeps {
   agentLibraryDir?: string;
   /** Tools available to agents (defaults to the built-in catalog). */
   toolCatalog?: ToolCatalog;
+  /** Extra browser origins allowed to change data (CSRF check). Loopback and same-origin are always allowed. */
+  allowedOrigins?: string[];
 }

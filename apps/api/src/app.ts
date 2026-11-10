@@ -7,6 +7,8 @@ import { AppError, isAppError, type ProblemDetails, uuidv7 } from '@platform/sha
 import type { AppDeps } from './deps.js';
 import { registerAuth } from './auth-plugin.js';
 import { registerIdempotency } from './idempotency.js';
+import { registerOriginCheck } from './csrf.js';
+import { registerResponseDocs } from './response-schemas.js';
 import { iamRoutes } from './routes/iam.js';
 import { projectRoutes } from './routes/projects.js';
 import { workRoutes } from './routes/work.js';
@@ -124,6 +126,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   await app.register(
     async (api) => {
+      registerResponseDocs(api, API_PREFIX);
+      registerOriginCheck(api, deps.allowedOrigins ?? []);
       registerAuth(api, deps.db);
       registerIdempotency(api, deps.db);
       api.get('/health', { config: { public: true } }, async () => ({ status: 'ok' }));

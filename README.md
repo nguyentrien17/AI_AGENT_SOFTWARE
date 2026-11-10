@@ -116,7 +116,7 @@ Invoke-RestMethod -Method Post -Uri "$api/auth/login" -ContentType 'application/
 
 ### Step 2 — Register the agents and the default workflow
 ```powershell
-Call Post '/agents/seed'      # loads agent-library/*.yaml: ba, architect, database, developer, review
+Call Post '/agents/seed'      # loads agent-library/skills/*.yaml, then agent-library/*.yaml: ba, architect, database, developer, review
 Call Post '/workflows/seed'   # loads agent-library/workflows/*.yaml: sdlc-default
 ```
 Running these again is safe: unchanged definitions are skipped, edited files become a new version.
@@ -244,6 +244,7 @@ Set in `<repo>/.env` or the shell. Relative paths are resolved from the reposito
 | `COOKIE_SECURE` | `false` | Set `true` when served over HTTPS |
 | `LOG_LEVEL` | `info` | `debug` · `info` · `warn` · `error` |
 | `RATE_LIMIT_PER_MINUTE` | `600` | Per-client request limit |
+| `ALLOWED_ORIGINS` | — | Extra browser origins allowed to change data (CSRF check), e.g. `https://platform.example.com`. Same-origin and localhost pages are always allowed |
 | `AGENT_LIBRARY_DIR` | `./agent-library` | Source of `POST /agents/seed` and `POST /workflows/seed` |
 | `WORKER_ENABLED` | `true` | Run the task worker inside the API process |
 | `WORKER_IDLE_MS` | `2000` | Worker poll interval when idle |
@@ -260,6 +261,11 @@ new immutable version. Every agent answers with a JSON envelope (`status`, `summ
 `handoff`, `result`); invalid answers get one bounded repair attempt. Each agent may only write its own
 area of `.ai-context/` (e.g. the BA writes `01-requirements/`, the Architect `02-architecture/`).
 
+### Skills (`agent-library/skills/*.yaml`)
+A skill is a reusable, versioned block of instructions (e.g. `secure-coding`, `adr-writing`). An agent
+lists skills with `skills: [...]`; their latest versions are added to its trusted instructions, and the
+exact agent and skill versions used are recorded with every context package.
+
 ### Workflows (`agent-library/workflows/*.yaml`)
 A workflow is a list of stages: `key`, `agentKey`, `title`, `objective`, `dependsOn` (stages without a
 dependency path between them run in parallel), `when` (condition on run variables, e.g.
@@ -275,7 +281,8 @@ as untrusted data and kept separate from the agent's instructions.
 For every call the router applies hard filters (allowlist, capabilities, health, context window, quality
 tier, budget, workspace ceilings), scores the remaining models and records why it chose one. Temporary
 provider failures fall back to the next allowed model; authentication errors, budget exhaustion or quality
-violations stop and ask a human. Budgets warn at 70 %, restrict non-essential work at 85 % and halt with a
+violations stop and ask a human. When a fallback would switch to another provider and the configuration
+sets `requireApprovalForProviderChange`, the task waits for a human approval of kind `provider_change`. Budgets warn at 70 %, restrict non-essential work at 85 % and halt with a
 checkpoint at 95 %; raising the limit (`PUT /budgets`) resumes work.
 
 ### Tools and safety
@@ -306,9 +313,13 @@ RFC 7807 (`application/problem+json`) with a machine-readable `code`. Full schem
 | Agents & workflows | `GET/POST /agents` · `POST /agents/seed` · `POST /agents/{id}/versions` · `GET/POST /workflows` · `POST /workflows/seed` |
 | Runs & approvals | `POST /projects/{id}/workflow-runs` · `GET /workflow-runs/{id}` · `POST /workflow-runs/{id}/pause\|resume\|cancel` · `GET /projects/{id}/approvals` · `POST /approvals/{id}/decision` |
 | Events | `GET /projects/{id}/events` · `GET /projects/{id}/events/stream` (SSE, resumes with `Last-Event-ID`) |
+| Checkpoints | `GET/POST /projects/{id}/checkpoints` · `GET /checkpoints/{id}` (verify) · `POST /checkpoints/{id}/restore` (never deletes history; creates branch `restore/<id>`) |
+| Skills | `GET /skills` |
 | Tools | `GET /tools` |
 
-Writes accept an `Idempotency-Key` header so retried requests are not applied twice.
+Writes accept an `Idempotency-Key` header so retried requests are not applied twice. Lists of tasks,
+artifacts, workflow runs and approvals are paginated: pass `?limit=` and the returned `nextCursor` as
+`?cursor=`. Writes from a browser page on another origin are rejected unless listed in `ALLOWED_ORIGINS`.
 
 ## 8. Development
 

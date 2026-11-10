@@ -5,6 +5,7 @@ role: architect
 timeout_seconds: 900
 retry_policy:
   max_output_repairs: 1
+skills: [adr-writing]
 allowed_actions: [read_context, write_artifact, emit_handoff]
 allowed_file_scopes: ['.ai-context/02-architecture/**', '.ai-context/04-api/**', '.ai-context/09-decisions/**']
 completion_criteria:

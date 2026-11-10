@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray } from 'drizzle-orm';
 import {
   type Db,
   projects,
@@ -19,6 +19,11 @@ import {
   NotFoundError,
   ValidationError,
   VersionConflictError,
+  clampLimit,
+  type Page,
+  type PageRequest,
+  toPage,
+  isUuid,
 } from '@platform/shared';
 import {
   assertTransition,
@@ -179,15 +184,26 @@ export async function getTask(db: Db, actor: Actor, taskId: string): Promise<Tas
   return t;
 }
 
-export async function listTasks(db: Db, actor: Actor, projectId: string, opts: { status?: TaskStatus } = {}) {
+/** Tasks of a project in creation order (UUIDv7 ids), one page at a time. */
+export async function listTasks(
+  db: Db,
+  actor: Actor,
+  projectId: string,
+  opts: { status?: TaskStatus } & PageRequest = {},
+): Promise<Page<Task>> {
   await authorize(db, actor, 'task.read', { projectId });
+  if (opts.cursor && !isUuid(opts.cursor)) throw new ValidationError('Invalid cursor');
+  const limit = clampLimit(opts.limit, 100, 200);
   const conds = [eq(tasks.projectId, projectId)];
   if (opts.status) conds.push(eq(tasks.status, opts.status));
-  return db
+  if (opts.cursor) conds.push(gt(tasks.id, opts.cursor));
+  const rows = await db
     .select()
     .from(tasks)
     .where(and(...conds))
-    .orderBy(asc(tasks.createdAt));
+    .orderBy(asc(tasks.id))
+    .limit(limit + 1);
+  return toPage(rows, limit, (t) => t.id);
 }
 
 export async function getTaskHistory(db: Db, actor: Actor, taskId: string) {
