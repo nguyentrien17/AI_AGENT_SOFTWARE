@@ -32,6 +32,13 @@ export const PERMISSIONS = [
   'task.write',
   'task.transition',
   'audit.read',
+  'ai.provider.read',
+  'ai.provider.manage',
+  'ai.model.read',
+  'ai.model.manage',
+  'ai.config.read',
+  'ai.config.manage',
+  'ai.playground.run',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -41,6 +48,9 @@ const READ: Permission[] = [
   'requirement.read',
   'artifact.read',
   'task.read',
+  'ai.provider.read',
+  'ai.model.read',
+  'ai.config.read',
 ];
 
 /** RBAC matrix (docs/phase-0/07-security-model.md §3). Deny by default. */
@@ -60,6 +70,8 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, ReadonlySet<Permission>>> =
     'task.write',
     'task.transition',
     'audit.read',
+    'ai.config.manage',
+    'ai.playground.run',
   ]),
   developer: new Set<Permission>([
     ...READ,
@@ -67,8 +79,9 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, ReadonlySet<Permission>>> =
     'artifact.write',
     'task.write',
     'task.transition',
+    'ai.playground.run',
   ]),
-  reviewer: new Set<Permission>([...READ, 'artifact.approve']),
+  reviewer: new Set<Permission>([...READ, 'artifact.approve', 'ai.playground.run']),
   viewer: new Set<Permission>(READ),
 };
 

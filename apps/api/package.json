@@ -16,6 +16,7 @@
     "@fastify/swagger": "^9.4.0",
     "@fastify/type-provider-typebox": "^5.1.0",
     "@sinclair/typebox": "^0.34.9",
+    "@platform/ai-management": "*",
     "@platform/artifacts": "*",
     "@platform/context": "*",
     "@platform/db": "*",

@@ -111,8 +111,8 @@ export class InvalidStateTransitionError extends AppError {
 }
 
 export class UnprocessableError extends AppError {
-  constructor(detail: string, code = 'unprocessable') {
-    super({ status: 422, code, title: 'Unprocessable request', detail });
+  constructor(detail: string, code = 'unprocessable', extensions?: Record<string, unknown>) {
+    super({ status: 422, code, title: 'Unprocessable request', detail, ...(extensions ? { extensions } : {}) });
   }
 }
 

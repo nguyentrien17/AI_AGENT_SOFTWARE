@@ -24,8 +24,8 @@ Source of truth: `../../ai_agent_software_platform_technical_blueprint (1).md` (
 | 0 — Discovery & Foundation | ✅ done (incl. P0-09 repo foundation) | passed (human approval 2026-11-10) |
 | 1 — Core Platform Foundation | ✅ backend done (P1-01…P1-13); P1-14 web shell pending | **passed** — [reports/phase-1.md](../reports/phase-1.md) |
 | 2 — Shared Context Engine | ✅ done (P2-01…P2-09); P2-10 Context Explorer UI pending | **passed** — [reports/phase-2.md](../reports/phase-2.md) |
-| 3 — AI Management | next | — |
-| 4 — Model Router & Budget | not started | — |
+| 3 — AI Management | ✅ done (P3-01…P3-10); P3-11 AI Management UI pending | **passed** — [reports/phase-3.md](../reports/phase-3.md) |
+| 4 — Model Router & Budget | next | — |
 | 5 — Agent Runtime & Orchestration | not started | — |
 | 6 — Tool Executor & Sandbox | not started (blocked: Docker not installed on dev host) | — |
 | 7 — Specialized Agents | not started | — |
@@ -43,6 +43,7 @@ Source of truth: `../../ai_agent_software_platform_technical_blueprint (1).md` (
 | `packages/projects` | projects, members, settings, requirements/stories/AC, workspace scaffold |
 | `packages/artifacts` | versioned, hashed, approvable artifacts (`context_items`/`context_versions`) + agent-role context access policy |
 | `packages/context` | handoffs, Context Package Builder/cache/invalidation, untrusted-context rendering, memories, checkpoints |
+| `packages/ai-management` | envelope-encrypted secret store, OpenAI/Gemini/Anthropic adapters, 7-state probe, model registry/capabilities/pricing, 5-scope agent model configs + runtime dispatcher, isolated AI Playground |
 | `packages/orchestration` | task state machine, DAG, gate-guarded completion |
 | `apps/api` | Fastify HTTP API `/api/v1` |
 

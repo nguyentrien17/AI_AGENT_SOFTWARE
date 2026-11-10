@@ -11,6 +11,7 @@ import { iamRoutes } from './routes/iam.js';
 import { projectRoutes } from './routes/projects.js';
 import { workRoutes } from './routes/work.js';
 import { contextRoutes } from './routes/context.js';
+import { aiRoutes } from './routes/ai.js';
 
 export type { AppDeps };
 
@@ -130,6 +131,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       projectRoutes(api, deps);
       workRoutes(api, deps);
       contextRoutes(api, deps);
+      aiRoutes(api, deps);
     },
     { prefix: API_PREFIX },
   );

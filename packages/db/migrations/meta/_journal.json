@@ -29,6 +29,20 @@
       "when": 1794282428239,
       "tag": "0003_context_append_only",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794283577756,
+      "tag": "0004_ai_management",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794283583805,
+      "tag": "0005_ai_append_only",
+      "breakpoints": true
     }
   ]
 }
