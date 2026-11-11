@@ -25,15 +25,15 @@ Part B (user request "làm phần B") is **complete** — report `docs/reports/p
   waited for `Model calls`. `waitFor` in `scripts/ui-smoke.mjs` is now case-insensitive; `Costs.tsx` got a
   "Group by" label. Smoke run against a fresh API: **11/11 steps `ok`, no JS problems**.
 - README has section 3.4 "Open the web interface"; B1 marked done in §5.
-- How to rerun the browser smoke test: `npm run build:web`; start the API on a fresh data dir
-  (`PLATFORM_DATA_DIR=.tmp/ui-check PORT=8797 PLATFORM_MASTER_KEY=<base64 32 bytes> WORKER_ENABLED=false`,
-  `node --import tsx src/main.ts` inside `apps/api`), then `node scripts/ui-smoke.mjs http://127.0.0.1:8797`.
-  Needs loopback + a Chromium browser (`EDGE_PATH`) — in a restricted agent sandbox run it unsandboxed.
+- How to rerun the browser smoke test: `npm run smoke:ui` (builds the UI, starts a throwaway API on a free
+  port with a temp data dir + random master key, runs `scripts/ui-smoke.mjs`, stops the API; exits 1 on a
+  failed step or JS error). Needs loopback + Edge/Chrome (auto-detected, or `EDGE_PATH`) — in a restricted
+  agent sandbox run it unsandboxed. CI job `ui-smoke` runs the same command with Chrome.
 - Sandbox note: the tool-executor symlink escape test fails with `EPERM` inside a sandbox that forbids
   symlinks; it passes on a normal shell. Do not weaken it.
 - Next: everything left is **blocked** (sandbox / real API key) or needs a decision (R18) — see §5. Ask the
-  user which to unblock; small UI follow-ups R29–R30 are in `docs/reports/part-b.md` (R31 Playground +
-  key rotation screens: done, smoke 13/13 ok).
+  user which to unblock. UI follow-ups R29 (component tests), R30 (smoke in CI) and R31 (Playground +
+  key rotation screens) are done.
 
 Web UI files: `apps/web` (React 19 + Vite 8 + TanStack Query/Router + Tailwind 4). Pages in
 `apps/web/src/pages`: Shell (bootstrap/login/nav), Projects, Project (runs + request editor + start run,
@@ -212,7 +212,7 @@ Status: **doing** = in progress this session · **todo** = can be done now · **
 | P8-06 Lineage API (Blueprint §17 audit questions) | 8 | **done** | `orchestration/src/lineage.ts`, `GET /tasks/{id}/lineage` (needs `audit.read`); test in `apps/api/test/tools.e2e.test.ts` |
 | P7-07 Default SDLC workflow + Developer agent definition | 7 | **done** | `agent-library/developer.yaml`, `agent-library/workflows/sdlc-default.yaml`, `seedWorkflowLibrary`, `POST /workflows/seed` |
 | P8-07 Concurrency tests (parallel claims, lease races) | 8 | **done** | `orchestration/test/library-concurrency.test.ts` |
-| Web UI (B1): P1-14 shell, P2-10 Context Explorer, P3-11 AI Mgmt, P4-10 Usage & Costs, P5-12 dashboards, P8-05 approval UI | 1–8 | **done** | `apps/web`; report `docs/reports/part-b.md`; browser smoke `scripts/ui-smoke.mjs` 11/11 ok. Follow-ups R29–R30 (component tests, smoke in CI); R31 done |
+| Web UI (B1): P1-14 shell, P2-10 Context Explorer, P3-11 AI Mgmt, P4-10 Usage & Costs, P5-12 dashboards, P8-05 approval UI | 1–8 | **done** | `apps/web`; report `docs/reports/part-b.md`; browser smoke `scripts/ui-smoke.mjs` 11/11 ok. Follow-ups R29 (component tests), R30 (smoke in CI), R31 (Playground, key rotation): all done |
 | R16 Approval request for provider change | 4 | **done** | router opens approval kind `provider_change` on fallback halt; approved providers allowed for that task; test in `orchestration/test/quality.test.ts` |
 | Phase 6 part B: Docker `SandboxAdapter`, limits, runtime images, terminal/test tools, log streaming, container escape tests | 6 | blocked | No Docker/Podman/WSL on host. Needs a container runtime or a remote Linux host |
 | P8-03 Dependency vulnerability scan | 8 | blocked | Must process untrusted project manifests → run inside the sandbox |
@@ -232,6 +232,7 @@ Status: **doing** = in progress this session · **todo** = can be done now · **
 | R19 tokenizer-based token estimate, R20 actual cost from billing APIs, R23 separate worker process, R24 SSE via LISTEN/NOTIFY, R25 prompt caching | — | todo (post-MVP) | Not needed for MVP gates |
 
 ## 6. Session log (newest first)
+- 2026-11-11 — R29: web component tests `apps/web/test/ui.test.tsx` (RTL + jsdom, TEST-ONLY fetch stub, 9 tests; vitest `esbuild.jsx: automatic`, per-file jsdom). R30: `npm run smoke:ui` (`scripts/ui-smoke-ci.mjs`), smoke script auto-detects the browser, exits 1 on failure/JS error, watchdog + CDP timeouts; CI job `ui-smoke`. Verified locally: 13/13 ok exit 0; forced 3 s limit → exit 1.
 - 2026-11-10 — R31: Web UI Playground tab (run / compare 2–5 models, cost-warning confirm, benchmarks) and provider key replace/revoke form; `del` helper in `api/client.ts`; smoke script gained 2 steps (13/13 ok; Playground step accepts a provider error because no Ollama runs in the smoke environment).
 - 2026-11-10 — Part B closed: Costs "blank page" was the smoke script's case-sensitive match against `uppercase` labels (fixed in `scripts/ui-smoke.mjs`; "Group by" label added in `Costs.tsx`); smoke 11/11 ok. README §3.4 Web UI, `docs/reports/part-b.md`. verify: 34 files / 287 tests (symlink escape test needs a non-sandboxed shell).
 - 2026-11-10 — Part B backend done: worktree cleanup, provider-change approvals (R16), CSRF origin check, pagination, OpenAPI response schemas, outbox dispatcher (lease-based) + context-map resync, checkpoint restore, agent skills. Next: Web UI (B1).

@@ -108,10 +108,15 @@ sign in. The UI is served by the API on the same origin, so no CORS/CSRF setting
 **UI development** (hot reload): keep `npm run dev:api` running and start `npm run dev:web` in a second
 window, then open http://127.0.0.1:5173 — Vite proxies `/api` to port 8787.
 
-**Browser smoke test** (headless Microsoft Edge through the DevTools protocol, no extra packages): start an
-API with a fresh data folder and the UI built, then run
-`node scripts/ui-smoke.mjs http://127.0.0.1:<port>`. Every step must print `ok`. Use `EDGE_PATH` to point
-at another Chromium-based browser.
+**Browser smoke test** (headless Edge or Chrome through the DevTools protocol, no extra packages):
+```powershell
+npm run smoke:ui      # builds the UI, starts a throwaway API (temp data dir, random key), runs every screen, stops it
+```
+Every step must print `ok`; the command exits non-zero on a failed step or any JavaScript error, and has a
+5-minute time limit (`SMOKE_TIMEOUT_MS`). The browser is found automatically (Edge/Chrome on Windows and
+macOS, `google-chrome`/`chromium` on Linux); set `EDGE_PATH` to choose one. Against an API you started
+yourself: `node scripts/ui-smoke.mjs http://127.0.0.1:<port>` (use a fresh data folder — the test creates
+the owner account). CI runs `npm run smoke:ui` as a separate job after the checks.
 
 ## 4. Walkthrough: from zero to a running workflow
 
@@ -354,6 +359,8 @@ artifacts, workflow runs and approvals are paginated: pass `?limit=` and the ret
 ```powershell
 npm run verify        # everything CI runs
 npm test              # tests only (Vitest); npx vitest run packages/budget  → one package
+npx vitest run apps/web   # web component tests (React Testing Library + jsdom)
+npm run smoke:ui      # browser smoke test of the web UI (needs Edge or Chrome)
 npm run test:watch
 npm run typecheck
 npm run lint
@@ -361,7 +368,8 @@ npm run depcheck      # architecture rules (.dependency-cruiser.cjs)
 npm run format
 ```
 Tests use an in-memory PostgreSQL (PGlite) and scripted, clearly labelled fake model responses — no API
-key or network is needed. CI (`.github/workflows/ci.yml`) runs the same checks on every push.
+key or network is needed. Web component tests replace the API with a labelled TEST-ONLY `fetch` stub. CI
+(`.github/workflows/ci.yml`) runs the same checks on every push, then the browser smoke test.
 
 ### Repository layout
 ```

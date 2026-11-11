@@ -110,8 +110,8 @@ the repository layout, and a troubleshooting row (UI not built when the API star
 ## Open issues & risks
 | # | Item | Plan |
 |---|------|------|
-| R29 | No automated component tests for the web UI (only build + API hosting tests + the manual-run browser smoke script) | Add Vitest + Testing Library, or run `ui-smoke.mjs` in CI with a browser image |
-| R30 | The smoke script needs a Chromium-based browser and loopback access, so it is not part of `npm run verify` | Keep it as a manual/CI step; `EDGE_PATH` selects the browser |
+| R29 | ~~No automated component tests for the web UI~~ | **Done**: `apps/web/test/ui.test.tsx` (React Testing Library + jsdom, labelled TEST-ONLY `fetch` stub), 9 tests. Covered: Costs (totals, unpriced note, re-grouping, API error), key replace/revoke (plaintext never rendered, confirm before revoke), Playground (cost-warning confirmation, compare + benchmark, hard-cap error), Table/ErrorNote. Run by `npm test` |
+| R30 | ~~The smoke script is not part of CI~~ | **Done**: `npm run smoke:ui` → `scripts/ui-smoke-ci.mjs` (throwaway API on a free port, temp data dir, random master key, worker off) → `scripts/ui-smoke.mjs` (auto-detects Edge/Chrome, exits 1 on a failed step or JS error, 5-min watchdog, 20 s CDP timeouts). CI job `ui-smoke` (after `verify`) runs it with Chrome on ubuntu-latest. `verify` job also builds the UI |
 | R31 | ~~Web UI has no Playground screen and no provider key rotation form yet~~ | **Done** (follow-up commit): AI models → Playground tab (single run or 2–5 model compare, cost-warning confirmation, results with tokens/latency/estimated cost, save + list benchmarks); Providers tab → "Replace or revoke a key" (masked hint only). Browser smoke 13/13 ok |
 | — | Phase 6 part B (sandbox), P8-03/P8-04, QA agent, P7-10, R14 live provider check | **blocked**: see `docs/HANDOFF.md` §5 |
 | R18 | Dedicated `budget.*` permissions | Needs human approval (RBAC change, Blueprint §20.7) |
